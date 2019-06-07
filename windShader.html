@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Red Cube</title>
+<style type="text/css">
+    html,
+    body {
+        margin: 0px;
+        height: 100%;
+        width: 100%
+    }
+
+    .container {
+        width: 1000px;
+        height: 800px
+    }
+</style>
+<script type="text/javascript" src="./js/maptalks.js"></script>
+<script src="js/maptalksgl-dev.js" type="text/javascript"></script>
+
+<body>
+    <canvas id="canvas" width=1000 height=800 class="container" style="border : 1px solid;"></canvas>
+    <canvas id='drawScreenCanvas' width=250 height=200 style="border : 1px solid"></canvas>
+    <canvas id='updateParticlesCanvas' width=250 height=200 style="border : 1px solid"></canvas>
+    <canvas id='backgroundTextureCanvas' width=250 height=200 style="border : 1px solid"></canvas>
+    <!-- <script src="./common/regl.js" type="text/javascript"></script> -->
+    <script type="module">
+        import drawVert from './glsl/drawVert.js';
+        import drawFrag from './glsl/drawFrag.js';
+        import quadVert from './glsl/quadVert.js';
+        import screenFrag from './glsl/screenFrag.js';
+        import updateFrag from './glsl/updateFrag.js';
+        const { createREGL, mat4, reshader } = maptalksgl;
+        const defaultRampColors = {
+            0.0: '#3288bd',
+            0.1: '#66c2a5',
+            0.2: '#abdda4',
+            0.3: '#e6f598',
+            0.4: '#fee08b',
+            0.5: '#fdae61',
+            0.6: '#f46d43',
+            1.0: '#d53e4f'
+        };
+        const windData = {
+            date: "2016-11-20T00:00Z",
+            height: 180,
+            url: './2016112000.png',
+            source: "http://nomads.ncep.noaa.gov",
+            uMax: 26.8,
+            uMin: -21.32,
+            vMax: 21.42,
+            vMin: -21.57,
+            width: 360
+        }
+        const drawScreenCanvas = document.getElementById('drawScreenCanvas');
+        const updateParticlesCanvas = document.getElementById('updateParticlesCanvas');
+        const fadeOpacity = 0.996; // how fast the particle trails fade on each frame
+        const speedFactor = 0.25; // how fast the particles move
+        const dropRate = 0.003; // how often the particles move to a random place
+        const dropRateBump = 0.01; // drop rate increase relative to individual particle speed
+        let colorRampTexture, backgroundTexture, screenTexture, particleStateTexture0, particleStateTexture1, windTexture;
+        let particleStateResolution;
+        let particleIndices;
+
+        const regl = createREGL({
+            canvas: canvas,
+            extensions: [
+                // 'ANGLE_instanced_arrays',
+                // 'OES_texture_float',
+                // 'OES_texture_float_linear',
+                'OES_element_index_uint',
+                'OES_standard_derivatives'
+            ]
+        });
+
+        canvas.onresize = resize;
+        const viewport = {
+            x: 0,
+            y: 0,
+            width: () => {
+                return canvas.width;
+            },
+            height: () => {
+                return canvas.height;
+            }
+        };
+        const drawShader = new reshader.MeshShader({
+            vert: drawVert,
+            frag: drawFrag,
+            uniforms: [
+                'u_wind',
+                'u_particles',
+                'u_color_ramp',
+                'u_particles_res',
+                'u_wind_min',
+                'u_wind_max'
+            ],
+            extraCommandProps: { viewport },
+            defines: {}
+        });
+
+        const screenShader = new reshader.MeshShader({
+            vert: quadVert,
+            frag: screenFrag,
+            uniforms: [
+                'u_screen',
+                'u_opacity'
+            ],
+            extraCommandProps: { viewport },
+            defines: {}
+        });
+
+        const updateSHader = new reshader.MeshShader({
+            vert: quadVert,
+            frag: updateFrag,
+            uniforms: [
+                'u_wind',
+                'u_particles',
+                'u_rand_seed',
+                'u_wind_res',
+                'u_wind_min',
+                'u_wind_max',
+                'u_speed_factor',
+                'u_drop_rate',
+                'u_drop_rate_bump'
+            ],
+            extraCommandProps: { 
+                viewport : {
+                    x: 0,
+                    y: 0,
+                    width : particleStateResolution,
+                    height : particleStateResolution
+                }
+             },
+            defines: {}
+        });
+
+        const image = new Image();
+        image.src = './2016112000.png'
+        image.onload = () => {
+            windData.image = image;
+            windTexture = regl.texture({
+                data: windData.image,
+                mag: 'linear',
+                min: 'linear'
+            });
+        }
+
+        setColorRamp(defaultRampColors);
+
+
+        const renderer = new reshader.Renderer(regl);
+        resize();
+        SetParticlesCount(65536);
+        const framebuffer = regl.framebuffer({
+            color: backgroundTexture,
+            depth: true
+        });
+        const raf = function () {
+            if (windData.image) {
+                render();
+            }
+            requestAnimationFrame(raf);
+        }
+        raf();
+        function copyFrameBuffer(canvas, width, height) {
+            const ctx = canvas.getContext('2d');
+            const pixel = regl.read({ framebuffer: framebuffer });
+            const imgdata = ctx.createImageData(width, height);
+            const canvdata = imgdata.data;
+            for (let i = 0; i < canvdata.length; i += 4) {
+                canvdata[i] = pixel[i];
+                canvdata[i + 1] = pixel[i + 1];
+                canvdata[i + 2] = pixel[i + 2];
+                canvdata[i + 3] = pixel[i + 3];
+            }
+            ctx.putImageData(imgdata, 0, 0);
+        }
+        //主绘制方法
+        function render() {
+            drawScreen();
+            //将framebuffer的数据绘制到另外的canvas上
+            // copyFrameBuffer(drawScreenCanvas, canvas.width, canvas.height);
+            updateParticles();
+            //将framebuffer的数据绘制到另外的canvas上
+            // copyFrameBuffer(updateParticlesCanvas, particleStateResolution, particleStateResolution);
+        }
+
+        function drawScreen() {
+            framebuffer({
+                color: screenTexture
+            });
+            drawParticles();
+            const quadScene = getQuadScene();
+            renderer.render(screenShader, {
+                u_screen: backgroundTexture,
+                u_opacity: fadeOpacity
+            }, quadScene, framebuffer);
+            renderer.render(screenShader, {
+                u_screen: screenTexture,
+                u_opacity: 1.0
+            }, quadScene);
+            const temp = backgroundTexture;
+            backgroundTexture = screenTexture;
+            screenTexture = temp;
+        }
+
+        function drawParticles() {
+            const particlesScene = getParticlesScene();
+            renderer.render(drawShader,
+                {
+                    u_wind: windTexture,
+                    u_particles: particleStateTexture0,
+                    u_color_ramp: colorRampTexture,
+                    u_particles_res: particleStateResolution,
+                    u_wind_min: [windData.uMin, windData.vMin],
+                    u_wind_max: [windData.uMax, windData.vMax]
+                }, particlesScene, framebuffer);
+        }
+
+        function updateParticles() {
+            framebuffer({
+                color: particleStateTexture1,
+                width : particleStateResolution,
+                height : particleStateResolution
+            });
+            const quadScene = getQuadScene();
+            renderer.render(updateSHader, {
+                u_wind: windTexture,
+                u_particles: particleStateTexture0,
+                u_rand_seed: Math.random(),
+                u_wind_res: [windData.width, windData.height],
+                u_wind_min: [windData.uMin, windData.vMin],
+                u_wind_max: [windData.uMax, windData.vMax],
+                u_speed_factor: speedFactor,
+                u_drop_rate: dropRate,
+                u_drop_rate_bump: dropRateBump,
+            }, quadScene, framebuffer);
+
+            const temp = particleStateTexture0;
+            particleStateTexture0 = particleStateTexture1;
+            particleStateTexture1 = temp;
+        }
+
+        function getQuadScene() {
+            const plane = new reshader.Geometry({
+                a_pos: [0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1]
+            }, 6, 0, {
+                    primitive: 'triangle',
+                    positionAttribute: 'a_pos',
+                    positionSize: 2
+                });
+            const planeMesh = new reshader.Mesh(plane);
+            const scene = new reshader.Scene([planeMesh]);
+            return scene;
+        }
+
+        function getParticlesScene() {
+            const particles = new reshader.Geometry({
+                a_index: particleIndices,
+            }, particleIndices.length, 0, {
+                    primitive: 'point',
+                    positionAttribute: 'a_index',
+                    positionSize: 1
+                });
+            const particlesMesh = new reshader.Mesh(particles);
+            const scene = new reshader.Scene([particlesMesh]);
+            return scene;
+        }
+
+        function setColorRamp(colors) {
+            // lookup texture for colorizing the particles according to their speed
+            // this.colorRampTexture = util.createTexture(this.gl, this.gl.LINEAR, getColorRamp(colors), 16, 16);
+            colorRampTexture = regl.texture({
+                width: 16,
+                height: 16,
+                data: getColorRamp(colors),
+                mag: 'linear',
+                min: 'linear'
+            });
+        }
+
+        function getColorRamp(colors) {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+
+            canvas.width = 256;
+            canvas.height = 1;
+
+            const gradient = ctx.createLinearGradient(0, 0, 256, 0);
+            for (const stop in colors) {
+                gradient.addColorStop(+stop, colors[stop]);
+            }
+
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, 256, 1);
+
+            return new Uint8Array(ctx.getImageData(0, 0, 256, 1).data);
+        }
+
+        function SetParticlesCount(count) {
+            // we create a square texture where each pixel will hold a particle position encoded as RGBA
+            const particleRes = particleStateResolution = Math.ceil(Math.sqrt(count));
+            const numParticles = particleRes * particleRes;
+
+            const particleState = new Uint8Array(numParticles * 4);
+            for (let i = 0; i < particleState.length; i++) {
+                particleState[i] = Math.floor(Math.random() * 256); // randomize the initial particle positions
+            }
+            // textures to hold the particle state for the current and the next frame
+            particleStateTexture0 = regl.texture({
+                data: particleState,
+                width: particleRes,
+                height: particleRes
+            });
+            particleStateTexture1 = regl.texture({
+                data: particleState,
+                width: particleRes,
+                height: particleRes
+            });
+
+            particleIndices = new Float32Array(numParticles);
+            for (let i = 0; i < numParticles; i++) {
+                particleIndices[i] = i;
+            }
+        }
+
+        function resize(e) {
+            const width = canvas.width;
+            const height = canvas.height;
+            const emptyPixels = new Uint8Array(width * height * 4);
+            // for (let i = 0; i < emptyPixels.length; i += 4) {
+            //     emptyPixels[i] = 0;
+            //     emptyPixels[i + 1] = 0;
+            //     emptyPixels[i + 2] = 0;
+            //     emptyPixels[i + 3] = 255;
+            // }
+            backgroundTexture = regl.texture({
+                width,
+                height,
+                data: emptyPixels
+            });
+            screenTexture = regl.texture({
+                width,
+                height,
+                data: emptyPixels
+            });
+        }
+    </script>
+</body>
+
+</html>

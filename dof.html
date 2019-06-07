@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DOF</title>
+  <style type="text/css">
+    html,body{margin:0px;height:100%;width:100%}
+    .container{width:1000px;height:800px}
+  </style>
+  <script type="text/javascript" src="./js/maptalks.js"></script>
+  <script src="js/maptalksgl-dev.js" type="text/javascript"></script>
+  <body>
+    <canvas id="canvas" width=1000 height=800 class="container" style="border : 1px solid"></canvas>
+    <script type="module">
+
+        const { mat4, vec3, reshader, createREGL } = maptalksgl;
+
+        const regl = createREGL({
+            canvas : canvas,
+            extensions : [
+                'OES_texture_float',
+                'OES_texture_float_linear',
+                'OES_element_index_uint',
+                'OES_standard_derivatives',
+                'WEBGL_depth_texture'
+            ]
+        });
+        const depth_frag = `
+            #ifdef GL_ES
+                precision mediump float;
+                #endif
+                vec4 pack (float depth) {
+                    // 当光源与照射物间距离变远,z值会增大,而1个分量的8位已经不够存储深度值,所以扩充使用4个分量共32位进行存储
+                    // 使用rgba 4字节共32位来存储z值,1个字节精度为1/256
+                    const vec4 bitShift = vec4(1.0, 256.0, 256.0 * 256.0, 256.0 * 256.0 * 256.0);
+                    const vec4 bitMask = vec4(1.0/256.0, 1.0/256.0, 1.0/256.0, 0.0);
+                    // gl_FragCoord:片元的坐标,fract():返回数值的小数部分
+                    vec4 rgbaDepth = fract(depth * bitShift); //计算每个点的z值 
+                    rgbaDepth -= rgbaDepth.rrgb * bitMask; // Cut off the value which do not fit in 8 bits
+                    return rgbaDepth;
+                }
+                vec4 encodeDepthAlphaProfileScatter(const in float depth, const in float alpha, const in float profile, const in float scatter) {
+                    vec4 pack = vec4(0.0);
+                    pack.a = alpha;
+                    if(profile == 0.0) {
+                        const vec3 code = vec3(1.0, 255.0, 65025.0);
+                        pack.rgb = vec3(code * depth);
+                        pack.gb = fract(pack.gb);
+                        pack.rg -= pack.gb * (1.0 / 256.0);
+                    }
+                    else {
+                        pack.g = fract(depth * 255.0);
+                        pack.r = depth - pack.g / 255.0;
+                        pack.b = floor(0.5 + scatter * 63.0) * 4.0 / 255.0;
+                    }
+                    pack.b -= mod(pack.b, 4.0 / 255.0);
+                    pack.b += profile / 255.0;
+                    return pack;
+                }
+                float near = 0.1; 
+                float far  = 1000.0;
+
+                float LinearizeDepth(float depth)
+                {
+                    float z = depth * 2.0 - 1.0; // back to NDC 
+                    return (2.0 * near * far) / (far + near - z * (far - near));    
+                }
+                void main() {
+                    float depth = LinearizeDepth(gl_FragCoord.z) / far;
+                    //float depth = (-gl_FragCoord.z - near) / (far - near);
+                    float alpha = 1.0;
+                    float scatter = 0.0;
+                    float profile = 0.0;
+                    gl_FragColor = encodeDepthAlphaProfileScatter(depth, alpha, scatter, profile);
+                }
+            `;
+        const depth_vert = `
+                precision mediump float;
+                attribute vec3 aPosition;
+                uniform mat4 projViewModelMatrix;
+                void main() {
+                    gl_Position = projViewModelMatrix * vec4(aPosition, 1.0);
+                }`;
+        const renderer = new reshader.Renderer(regl);
+        window.UNIFORMS = {
+            NearFarFocal : [0.2889, 0.2278, 0.7165],
+            dofScale : 0.5730
+        };
+        let time = 0;
+        let cameraPos = [4, 4, 8];
+        let mouseDown = false;
+        let roll = Math.PI/3;
+        let pitch = Math.PI/4;
+        let translate = 12.0;
+        var wheelSpeed = 1.04;
+        let lastMouseX = null;
+        let lastMouseY = null;
+        const quadScene = getQuadScene();
+        let scene = null;
+        let imageTexture = null;
+        const image = new Image()
+        image.src = './images/wall.jpg';
+        image.onload = function () {
+            imageTexture = regl.texture(image);
+            scene = getScene();
+        }
+        let lookupTexture = null;
+        const lookupImage = new Image();
+        lookupImage.src = './images/lookup_miss_etikate.png';
+        lookupImage.onload = function() {
+            lookupTexture = regl.texture(lookupImage);
+        }
+        const fbo_depth = regl.framebuffer({
+            color: regl.texture({
+                width: canvas.width,
+                height: canvas.height,
+                wrap: 'clamp'
+            }),
+            depth: true
+        });
+        const fbo = regl.framebuffer({
+            color: regl.texture({
+                width: canvas.width,
+                height: canvas.height,
+                wrap: 'clamp'
+            }),
+            depth: true
+        });
+        const depth_shader = new reshader.MeshShader({
+            vert : depth_vert,
+            frag : depth_frag,
+            uniforms : [
+               {
+                    name : 'projViewModelMatrix',
+                    type : 'function',
+                    fn : function (context, props) {
+                        return mat4.multiply([], props['projViewMatrix'], props['modelMatrix']);
+                    }
+                }
+            ],
+            defines : {
+            }
+        }); 
+        const shader = new reshader.PhongShader();
+        const dofShader = new reshader.dof.DofShader();
+        function drawDepthFBO(cameraProjViewMatrix) {
+            renderer.render(depth_shader, {
+                'projViewMatrix' : cameraProjViewMatrix
+            }, scene, fbo_depth);
+        }
+        function drawFBO(cameraProjViewMatrix) {
+            renderer.render(shader, {
+                'projViewMatrix' : cameraProjViewMatrix,
+                'viewPos' : cameraPos
+            }, scene, fbo);
+        }
+        
+        //创建帧缓冲
+        const fbo_coc = regl.framebuffer({
+            color: regl.texture({
+                width: canvas.width / 2,
+                height: canvas.height / 2,
+                wrap: 'clamp'
+            }),
+            depth: true
+        });
+        const dof_cocShader = new reshader.dof.DofCocShader();
+        function drawCoCFBO(cameraProjViewMatrix) {
+            renderer.render(dof_cocShader, {
+                'TextureDepth' : fbo_depth,
+                'uTextureDepthRatio' : [1, 1],
+                'uTextureDepthSize' : [canvas.width, canvas.height],
+                'uTextureOutputSize' : [canvas.width / 2, canvas.height / 2],
+                'uDofBlurNearFarFocal' : UNIFORMS.NearFarFocal
+            }, quadScene, fbo_coc);
+        }
+        const fbo_hdilat = regl.framebuffer({
+            color: regl.texture({
+                width: canvas.width / 2,
+                height: canvas.height / 2,
+                wrap: 'clamp'
+            }),
+            depth: true
+        });
+
+        const dof_HShader = new reshader.dof.DofHShader();
+        function drawHdilatFBO(cameraProjViewMatrix) {
+            renderer.render(dof_HShader, {
+                'uDofScale':UNIFORMS.dofScale,
+                //'uRGBMRange',
+                'TextureDepth' : fbo_depth,
+                'TextureDofCoC' : fbo_coc,
+                //'TextureInput',
+                'uTextureDepthRatio' : [1,1],
+                'uTextureDepthSize' : [canvas.width, canvas.height],
+                'uTextureDofCoCRatio' : [1, 1],
+                'uTextureDofCoCSize':[canvas.width/2, canvas.height/2],
+                //'uTextureOutputRatio',
+                'uTextureOutputSize':[canvas.width/2, canvas.height/2],
+                'uDofBlurNearFarFocal' : UNIFORMS.NearFarFocal
+            }, quadScene, fbo_hdilat);
+        }
+        const fbo_vdilat = regl.framebuffer({
+            color: regl.texture({
+                width: canvas.width / 2,
+                height: canvas.height / 2,
+                wrap: 'clamp'
+            }),
+            depth: true
+        });
+        const dof_VShader = new reshader.dof.DofVShader();
+        function drawVdilatFBO(cameraProjViewMatrix) {
+            renderer.render(dof_VShader, {
+                'uDofScale':UNIFORMS.dofScale,
+                //'uRGBMRange',
+                'TextureDepth' : fbo_depth,
+                'TextureDofCoC' : fbo_hdilat,
+                //'TextureInput',
+                'uTextureDepthRatio' : [1,1],
+                'uTextureDepthSize' : [canvas.width, canvas.height],
+                'uTextureDofCoCRatio' : [1, 1],
+                'uTextureDofCoCSize':[canvas.width/2, canvas.height/2],
+                //'uTextureOutputRatio',
+                'uTextureOutputSize':[canvas.width/2, canvas.height/2],
+                'uDofBlurNearFarFocal' : UNIFORMS.NearFarFocal
+            }, quadScene, fbo_vdilat);
+        }
+
+        const fbo_downsample = regl.framebuffer({
+            color: regl.texture({
+                width: canvas.width / 2,
+                height: canvas.height / 2,
+                wrap: 'clamp'
+            }),
+            depth: true
+        });
+        const dof_dwonShader = new reshader.dof.DofDownShader();
+        function drawdownFBO(cameraProjViewMatrix) {
+            renderer.render(dof_dwonShader, {
+                'uRGBMRange' : 7,
+                'TextureDofCoC' : fbo_vdilat,
+                'TextureInput' : fbo,
+                'uTextureDofCoCRatio' : [1, 1],
+                'uTextureDofCoCSize' : [canvas.width/2, canvas.height/2],
+                'uTextureInputRatio' : [1, 1],
+                'uTextureInputSize': [canvas.width, canvas.height],
+                //'uTextureOutputRatio',
+                'uTextureOutputSize':[canvas.width/2, canvas.height/2],
+            }, quadScene, fbo_downsample);
+        }
+
+        const fbo_blur = regl.framebuffer({
+            color: regl.texture({
+                width: canvas.width / 2,
+                height: canvas.height / 2,
+                wrap: 'clamp'
+            }),
+            depth: true
+        });
+        const dof_blurShader = new reshader.dof.DofBlurShader();
+        function drawBlurFBO(cameraProjViewMatrix) {
+            renderer.render(dof_blurShader, {
+                'uDofScale' : 0.573,
+                'uFrameModTaaSS' : 8,
+                'uQuality' : 0.8,
+                'uRGBMRange' : 7,
+                'TextureDofColor':fbo_downsample,
+                //'TextureInput',
+                'uTextureDofColorRatio' : [1,1],
+                'uTextureDofColorSize':[canvas.width/2, canvas.height/2],
+                //'uTextureOutputRatio',
+                'uTextureOutputSize' : [canvas.width/2, canvas.height/2],
+                'uDofBlurNearFarFocal': UNIFORMS.NearFarFocal,
+            }, quadScene,fbo_blur);
+        }
+
+        const fbo_combine = regl.framebuffer({
+            color: regl.texture({
+                width: canvas.width,
+                height: canvas.height,
+                wrap: 'clamp'
+            }),
+            depth: true
+        });
+        const dof_combineShader = new reshader.dof.DofCombineShader();
+        function drawCombineFBO(cameraProjViewMatrix) {
+            renderer.render(dof_combineShader, {
+                'uDofScale' : 0.573,
+                'uRGBMRange' : 7,
+                'TextureDepth' : fbo_depth,
+                'TextureDofBlurCircular' : fbo_blur,
+                'TextureDofNearDilateV' : fbo_vdilat,
+                'TextureInput' : fbo,
+                'uTextureDepthRatio' : [1, 1],
+                'uTextureDepthSize' : [canvas.width, canvas.height],
+                'uTextureDofBlurCircularRatio':[1,1],
+                'uTextureDofBlurCircularSize':[canvas.width/2, canvas.height/2],
+                'uTextureDofNearDilateVRatio':[1,1],
+                'uTextureDofNearDilateVSize':[canvas.width/2, canvas.height/2],
+                'uTextureInputRatio':[1,1],
+                'uTextureInputSize':[canvas.width, canvas.height],
+                //'uTextureOutputRatio',
+                'uTextureOutputSize':[canvas.width, canvas.height],
+                'uColorBalanceHigh':[0,0,0],
+                'uColorBalanceLow':[0,0,0],
+                'uColorBalanceMid':[0,0,0],
+                'uDofBlurNearFarFocal' : UNIFORMS.NearFarFocal
+            }, quadScene);
+        }
+
+        function drawScene() {
+            renderer.render(dofShader, {
+                'uFrameMod' : 8,
+                //'uRGBMRange',
+                //'TextureExtra',
+                'TextureInput':fbo_combine,
+                'uLensRadius' : [0.8, 0.25],
+                'uPixelRatio' : [1, 1],
+                'uTextureExtraRatio' : [1, 1],
+                'uTextureExtraSize' : [canvas.width, canvas.height],
+                'uTextureInputRatio':[1,1],
+                'uTextureInputSize':[canvas.width, canvas.height],
+                'uTextureOutputSize':[canvas.width, canvas.height],
+                'uDofCross':[ 0.4989, 0.4982, 0]
+            }, quadScene);
+        }
+        function render() {
+            time += 0.01;
+            if(imageTexture&&lookupTexture) {
+                const cameraProjViewMatrix = getViewProjection(cameraPos);
+                clearFBO();
+                drawDepthFBO(cameraProjViewMatrix);
+                drawFBO(cameraProjViewMatrix);
+                drawCoCFBO();
+                drawHdilatFBO();
+                drawVdilatFBO();
+                drawdownFBO();
+                drawBlurFBO();
+                drawCombineFBO();
+                // //
+                // drawScene();
+            }
+            requestAnimationFrame(render);
+        }
+        render();
+        initGUI();
+        function getScene() {
+            const cube = new reshader.Geometry({
+                aPosition : cubeData.vertices,
+                NORMAL : cubeData.normals,
+                TEXCOORD_0 : cubeData.textures
+            }, cubeData.indices);
+            const plane = new reshader.Geometry({
+                aPosition : planeData.vertices,
+                NORMAL : planeData.normals,
+                //TEXCOORD_0 : planeData.textures
+            }, planeData.indices, 0, {
+                primitive : 'triangle'
+            });
+            
+            const material = new reshader.PhongMaterial({
+                'lightAmbient' : [0.1, 0.1, 0.1, 1.0],
+                'lightDiffuse' : [0.2, 0.2, 0.2, 1.0],
+                'lightSpecular' : [0.3, 0.3, 0.3, 1.0],
+                'materialShininess' : 32.0,
+                'ambientStrength' : 0.2,
+                'specularStrength' : 0.2,
+                'opacity' : 1.0,
+                'lightPosition' : [4.0, 8.0, 14.0]
+            });
+            var meshes = [];
+            for(var i = -2;i < 3; i++ ){
+                for(var j = -2;j < 3;j++) {
+                    const cubeMesh = new reshader.Mesh(cube, material);
+                    const cubeModel = mat4.identity([]);                       
+                    mat4.translate(cubeModel, cubeModel,[i * 6,1.51,j * 6]);
+                    mat4.scale(cubeModel, cubeModel,[0.5, 0.5, 0.5]);
+                    cubeMesh.setLocalTransform(cubeModel);
+                    cubeMesh.setDefines({
+                        USE_BASECOLORTEXTURE : 1
+                    });
+                    cubeMesh.setUniform('sample', imageTexture);
+                    meshes.push(cubeMesh);
+                }
+            }
+            const planeMesh = new reshader.Mesh(plane, material);
+            const planeModel = mat4.identity([]);
+            mat4.scale(planeModel, planeModel, [20, 20, 20]);
+            planeMesh.setLocalTransform(planeModel);
+            meshes.push(planeMesh);
+            const scene = new reshader.Scene(meshes);
+            return scene;
+        }
+        
+        function getQuadScene() {
+            const plane = new reshader.Geometry({
+                aPosition : planeData.vertices2
+                // aTexCoord : planeData.textures
+            }, planeData.indices, 0, {
+                primitive : 'triangle',
+                positionSize : 2
+            });
+            const planeMesh = new reshader.Mesh(plane);
+            // const planeModel = mat4.identity([]);
+            // mat4.rotate(planeModel, planeModel,Math.PI / 4, [1.0,0,0]);
+            // mat4.scale(planeModel, planeModel, [10, 10, 10]);
+            // planeMesh.setLocalTransform(planeModel);
+            const scene = new reshader.Scene([planeMesh]);
+            return scene;
+        }
+
+        function getViewProjection(cameraPos) {
+            const aspect = canvas.width / canvas.height;
+            const projection = mat4.perspective([], 60 * Math.PI / 180, aspect, 0.1, 1000);
+            const view = mat4.lookAt([], cameraPos, [0, 0, 0], [0, 1, 0]);
+            // const viewProjection = mat4.multiply([], projection, view);
+            var xRotation = mat4.create();
+            mat4.rotateY(xRotation, xRotation, roll);
+            var yRotation = mat4.create();
+            mat4.rotateX(yRotation, yRotation, pitch);
+            var viewMatrix = mat4.create();
+            mat4.multiply(viewMatrix, yRotation, xRotation);
+            viewMatrix[14] = -translate;
+            const viewProjection = mat4.multiply([], projection, viewMatrix);
+            return viewProjection;
+        }
+
+        function clearFBO(){
+            regl.clear({
+                    color: [0, 0, 0, 1],
+                    depth: 1,
+                    framebuffer : fbo
+                });
+                regl.clear({
+                    color: [0, 0, 0, 1],
+                    depth: 1,
+                    framebuffer : fbo_depth
+                });
+                regl.clear({
+                    color: [0, 0, 0, 1],
+                    depth: 1,
+                    framebuffer : fbo_coc
+                });
+                regl.clear({
+                    color: [0, 0, 0, 1],
+                    depth: 1,
+                    framebuffer : fbo_hdilat
+                });
+                regl.clear({
+                    color: [0, 0, 0, 1],
+                    depth: 1,
+                    framebuffer : fbo_vdilat
+                });
+                regl.clear({
+                    color: [0, 0, 0, 1],
+                    depth: 1,
+                    framebuffer : fbo_downsample
+                });
+                regl.clear({
+                    color: [0, 0, 0, 1],
+                    depth: 1,
+                    framebuffer : fbo_blur
+                });
+                // regl.clear({
+                //     color: [0, 0, 0, 1],
+                //     depth: 1,
+                //     framebuffer : fbo_combine
+                // });
+        }
+
+        canvas.onmousedown = function(ev) { handleMouseDown(ev); };
+        canvas.onmouseup = function(ev) { handleMouseUp(ev); };
+        canvas.onmousemove = function(ev) { handleMouseMove(ev); };
+        canvas.onwheel = function(ev) { handleWheel(ev); };
+        function handleMouseDown(ev) {
+            mouseDown = true;
+            lastMouseX = ev.clientX;
+            lastMouseY = ev.clientY;
+        }
+        function handleMouseUp(ev) {
+            mouseDown = false;
+        }
+        function handleMouseMove(ev) {
+            if (!mouseDown) {
+                return;
+            }
+            var newX = ev.clientX;
+            var newY = ev.clientY;
+            var deltaX = newX - lastMouseX;
+            roll += (deltaX / 100.0);
+            var deltaY = newY - lastMouseY;
+            pitch += (deltaY / 100.0);
+            lastMouseX = newX;
+            lastMouseY = newY;
+            updateCamera();
+        }
+        function handleWheel(ev, redraw) {
+            ev.preventDefault();
+            if (ev.deltaY > 0) {
+                translate *= wheelSpeed;
+            }
+            else {
+                translate /= wheelSpeed;
+            }
+            updateCamera();
+        }
+
+        function updateCamera() {
+            cameraPos = [-translate * Math.sin(roll) * Math.cos(-pitch),
+            -translate * Math.sin(-pitch),
+            translate * Math.cos(roll) * Math.cos(-pitch)];
+        }
+    </script>
+    <script type="text/javascript" src="js/initGui-dof.js"></script>
+  </body>
+</html>
