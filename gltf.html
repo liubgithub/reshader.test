@@ -14,11 +14,20 @@
     <canvas id="canvas" width=1000 height=800 class="container" style="border : 1px solid"></canvas>
     <!-- <script src="./common/regl.js" type="text/javascript"></script> -->
     <script type="module">
+        import outlineVert from './shaders/outlineVert.js';
         import depth_vert from './shaders/depthVert.js';
         import depth_frag from './shaders/depthFrag.js';
+        import A_vert from './shaders/AVert.js';
+        import A_frag from './shaders/AFrag.js';
+        import B_frag from './shaders/BFrag.js';
+        import C_frag from './shaders/CFrag.js';
+        import D_frag from './shaders/DFrag.js';
+        import Edage_frag from './shaders/EdageFrag.js';
+        import QuadScene_frag from './shaders/QuadSceneFrag.js';
         const { createREGL, mat4, reshader } = maptalksgl;
         const MODES = ['points', 'lines', 'line strip', 'line loop', 'triangles', 'triangle strip', 'triangle fan'];
         let camPos = [0, 0, 6];
+        const cameraNearFar = [0.1, 200];
         let mouseDown = false;
         let roll = Math.PI;
         let pitch = 0.0;
@@ -37,35 +46,6 @@
             '33684' : 'mirrored repeat',
             '10497' : 'repeat'
         };
-        const DEFINES = {
-            HAS_TANGENTS : 1,
-            MANUAL_SRGB : 1,
-            SRGB_FAST_APPROXIMATION : 1,
-            USE_IBL : 1,
-            USE_TEX_LOD : 1
-        };
-        const TEXTURE_DEFINES = {
-            'baseColorTexture' : {
-                define:'HAS_BASECOLORMAP',
-                sampler : 'u_BaseColorSampler'
-            },
-            'normalTexture' : {
-                define : 'HAS_NORMALMAP',
-                sampler : 'u_NormalSampler'
-            },
-            'emissiveTexture' : {
-                define : 'HAS_EMISSIVEMAP',
-                sampler : 'u_EmissiveSampler'
-            },
-            'metallicRoughnessTexture' : {
-                define : 'HAS_METALROUGHNESSMAP',
-                sampler : 'u_MetallicRoughnessSampler'
-            },
-            'occlusionTexture' : {
-                define : 'HAS_OCCLUSIONMAP',
-                sampler : 'u_OcclusionSampler'
-            }
-        };
         const regl = createREGL({
             canvas : canvas,
             extensions : [
@@ -78,15 +58,108 @@
 
         // let iblMaps;
         let scene;
-        const quadScene = getScene();
+        const quadScene = getQuadScene();
         // const loader = new reshader.ResourceLoader(regl.texture(2));
         const renderer = new reshader.Renderer(regl);
+
+        const viewport = {
+            x: 0,
+            y: 0,
+            width: () => {
+                return canvas.width;
+            },
+            height: () => {
+                return canvas.height;
+            }
+        };
+        const halfViewport = {
+            x: 0,
+            y: 0,
+            width: () => {
+                return canvas.width / 2;
+            },
+            height: () => {
+                return canvas.height / 2;
+            }
+        };
 
         const fbo_depth = regl.framebuffer({
             color: regl.texture({
                 width: canvas.width,
                 height: canvas.height,
-                wrap: 'clamp'
+                wrap: 'clamp',
+                mag : 'linear',
+                min : 'linear'
+            }),
+            depth: true
+        });
+        const fbo_a =  regl.framebuffer({
+            color: regl.texture({
+                width: canvas.width,
+                height: canvas.height,
+                wrap: 'clamp',
+                mag : 'linear',
+                min : 'linear'
+            }),
+            depth: true
+        });
+        const fbo_b =  regl.framebuffer({
+            color: regl.texture({
+                width: canvas.width,
+                height: canvas.height,
+                wrap: 'clamp',
+                mag : 'linear',
+                min : 'linear'
+            }),
+            depth: true
+        });
+        const fbo_c =  regl.framebuffer({
+            color: regl.texture({
+                width: canvas.width,
+                height: canvas.height,
+                wrap: 'clamp',
+                mag : 'linear',
+                min : 'linear'
+            }),
+            depth: true
+        });
+        const fbo_d =  regl.framebuffer({
+            color: regl.texture({
+                width: canvas.width,
+                height: canvas.height,
+                wrap: 'clamp',
+                mag : 'linear',
+                min : 'linear'
+            }),
+            depth: true
+        });
+        const fbo_e =  regl.framebuffer({
+            color: regl.texture({
+                width: canvas.width,
+                height: canvas.height,
+                wrap: 'clamp',
+                mag : 'linear',
+                min : 'linear'
+            }),
+            depth: true
+        });
+        const fbo_f =  regl.framebuffer({
+            color: regl.texture({
+                width: canvas.width,
+                height: canvas.height,
+                wrap: 'clamp',
+                mag : 'linear',
+                min : 'linear'
+            }),
+            depth: true
+        });
+        const fbo_g =  regl.framebuffer({
+            color: regl.texture({
+                width: canvas.width,
+                height: canvas.height,
+                wrap: 'clamp',
+                mag : 'linear',
+                min : 'linear'
             }),
             depth: true
         });
@@ -94,7 +167,9 @@
             color: regl.texture({
                 width: canvas.width,
                 height: canvas.height,
-                wrap: 'clamp'
+                wrap: 'clamp',
+                mag : 'linear',
+                min : 'linear'
             }),
             depth: true
         });
@@ -110,43 +185,242 @@
                     }
                 }
             ],
+            positionAttribute : 'POSITION',
+            extraCommandProps: { viewport },
             defines : {
             }
         });
-        const sceneShader = new reshader.PhongShader({
+        const A_shader = new reshader.MeshShader({
+            vert : A_vert,
+            frag : A_frag,
+            uniforms : [
+                'projectionMatrix',
+                'viewMatrix',
+                'cameraPosition',
+                'depthTexture',
+                'cameraNearFar',
+                {
+                    name : 'textureMatrix',
+                    type : 'function',
+                    fn : function(context, props) {
+                        const textureMatrix = mat4.set([], 0.5, 0.0, 0.0, 0.5,
+                            0.0, 0.5, 0.0, 0.5, 0.0, 0.0, 0.5, 0.5, 0.0, 0.0, 0.0, 1.0);
+                        mat4.multiply(textureMatrix, textureMatrix, props['viewMatrix']);
+                        const inverseMatrix = mat4.invert([], props['modelMatrix']);
+                        mat4.multiply(textureMatrix, textureMatrix, inverseMatrix);
+                        return textureMatrix;
+                    }
+                },
+                {
+                    name : 'modelViewMatrix',
+                    type : 'function',
+                    fn : function (context, props) {
+                        return mat4.multiply([], props['viewMatrix'], props['modelMatrix']);
+                    } 
+                }
+            ],
+            positionAttribute : 'POSITION',
+            extraCommandProps: { viewport,
+                cull: {
+                    enable: false
+                }
+            },
+        });
+
+        const B_shader = new reshader.MeshShader({
+            vert : outlineVert,
+            frag : B_frag,
+            uniforms : [
+                'opacity',
+                'tDiffuse'
+            ],
+            positionAttribute : 'POSITION',
+            extraCommandProps: { viewport,
+                cull: {
+                    enable: true
+                }
+            },
+        });
+
+        const C_shader = new reshader.MeshShader({
+            vert : outlineVert,
+            frag : C_frag,
+            uniforms : [
+                'texSize',
+                'visibleEdgeColor',
+                'hiddenEdgeColor',
+                'maskTexture'
+            ],
+            positionAttribute : 'POSITION',
+            extraCommandProps: { viewport, depth: {
+                    enable: true,
+                    mask: true,
+                }
+            },
+        });
+
+        const D_shader = new reshader.MeshShader({
+            vert : outlineVert,
+            frag : D_frag,
+            uniforms : [
+                'texSize',
+                'direction',
+                'kernelRadius',
+                'colorTexture'
+            ],
+            positionAttribute : 'POSITION',
+            extraCommandProps: { viewport },
+        });
+
+        const Edage_shader = new reshader.MeshShader({
+            vert : outlineVert,
+            frag : Edage_frag,
+            uniforms : [
+                'edgeStrength',
+                'edgeGlow',
+                'maskTexture',
+                'edgeTexture1',
+                'edgeTexture2'
+            ],
+            positionAttribute : 'POSITION',
+            extraCommandProps: { viewport,
+                blend: {
+                    enable: true
+                }
+            }
+        });
+
+        const QuadScene_shader = new reshader.MeshShader({
+            vert : outlineVert,
+            frag : QuadScene_frag,
+            uniforms : [
+                'sceneTexture',
+            ],
+            positionAttribute : 'POSITION',
+            extraCommandProps: { viewport, 
+                blend: {
+                    enable: true
+                }
+            }
+        });
+
+        const SceneShader = new reshader.PhongShader({
             positionAttribute : 'POSITION'
         });
-        function drawDepthFBO(cameraProjViewMatrix) {
+        function drawDepthFBO(marix) {
             renderer.render(depth_shader, {
-                'projViewMatrix' : cameraProjViewMatrix
+                'projViewMatrix' : marix.projViewMatrix
             }, scene, fbo_depth);
         }
-        function drawSceneFBO(cameraProjViewMatrix) {
-            renderer.render(shader, {
-                'projViewMatrix' : cameraProjViewMatrix,
-                'viewPos' : cameraPos
-            }, scene, scene_fbo);
+
+        function drawAFBO(matrix) {
+            renderer.render(A_shader, {
+                'projectionMatrix' : matrix.projMatrix,
+                'viewMatrix' : matrix.viewMatrix,
+                'cameraPosition' : camPos,
+                'depthTexture' : fbo_depth,
+                'cameraNearFar' : cameraNearFar,
+            }, scene, fbo_a);
+        }
+
+        function drawBFBO() {
+            renderer.render(B_shader, {
+                'opacity' : 1,
+                'tDiffuse' : fbo_a,
+            }, quadScene, fbo_b);
+        }
+
+        function drawCFBO() {
+            renderer.render(C_shader, {
+                'texSize' : [canvas.width / 2, canvas.height / 2],
+                'visibleEdgeColor' : [1, 1, 1],
+                'hiddenEdgeColor' : [0.1000, 0.0400, 0.0200],
+                'maskTexture' : fbo_b
+            }, quadScene, fbo_c);
+        }
+
+        function drawDFBO() {
+            renderer.render(D_shader, {
+                'texSize' : [canvas.width / 2, canvas.height / 2],
+                'direction' : [1, 0],
+                'kernelRadius' : 1,
+                'colorTexture' : fbo_c
+            }, quadScene, fbo_d);
+        }
+
+        function drawEFBO() {
+            renderer.render(D_shader, {
+                'texSize' : [canvas.width / 2, canvas.height / 2],
+                'direction' : [0, 1],
+                'kernelRadius' : 1,
+                'colorTexture' : fbo_d
+            }, quadScene, fbo_e);
+        }
+
+        function drawFFBO() {
+            renderer.render(D_shader, {
+                'texSize' : [canvas.width / 4, canvas.height / 4],
+                'direction' : [1, 0],
+                'kernelRadius' : 2,
+                'colorTexture' : fbo_e
+            }, quadScene, fbo_f);
+        }
+
+        function drawGFBO() {
+            renderer.render(D_shader, {
+                'texSize' : [canvas.width / 4, canvas.height / 4],
+                'direction' : [0, 1],
+                'kernelRadius' : 2,
+                'colorTexture' : fbo_f
+            }, quadScene, fbo_g);
+        }
+
+        function drawEdageFBO() {
+            renderer.render(Edage_shader, {
+                'edgeStrength' : 3,
+                'edgeGlow' : 0,
+                'maskTexture' : fbo_b,
+                'edgeTexture1' : fbo_d,
+                'edgeTexture2' : fbo_g
+            }, quadScene);
         }
        
-        function drawScene() {
-            const projViewMatrix = getViewProjection(camPos, canvas.width / canvas.height);
+        function drawSceneFBO(matrix) {      
             const material = new reshader.PhongMaterial({
                 viewPos : camPos,
-                projViewMatrix
+                projViewMatrix : matrix.projViewMatrix
             });
             renderer.render(
-                sceneShader,
+                SceneShader,
                 // 手动填入的uniform 值
                 // 有一个uniform会自动设置：model， 值是mesh的localTransform
                 material.getUniforms(),
                 scene,
-                null  //最后一个参数是framebuffer，可以指定framebuffer目标
+                fbo_scene  //最后一个参数是framebuffer，可以指定framebuffer目标
             );
-            requestAnimationFrame(drawScene);
+        }
+
+        function drawQuadScene() {
+            renderer.render(QuadScene_shader, {
+                'sceneTexture' : fbo_scene,
+            }, quadScene);
         }
 
         function drawAll() {
-            drawScene();
+            const matrix = getViewProjection(camPos, canvas.width / canvas.height);
+            clearFBO();
+            drawSceneFBO(matrix);
+            drawDepthFBO(matrix);
+            drawAFBO(matrix);
+            drawBFBO();
+            drawCFBO();
+            drawDFBO();
+            drawEFBO();
+            drawFFBO();
+            drawGFBO();
+            drawQuadScene();
+            drawEdageFBO();
+            requestAnimationFrame(drawAll);
         }
 
         //主绘制方法
@@ -155,7 +429,7 @@
             const scenePromise = getScene();
             scenePromise.then(result => {
                 scene = result;
-                drawScene();
+                drawAll();
             });
         }
 
@@ -193,9 +467,10 @@
 
         function getQuadScene() {
             const plane = new reshader.Geometry({
-                aPosition: [0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1]
+                POSITION: [-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]
             }, 6, 0, {
                     primitive: 'triangle',
+                    positionAttribute : 'POSITION',
                     positionSize: 2
                 });
             const planeMesh = new reshader.Mesh(plane);
@@ -262,7 +537,7 @@
 
         function getViewProjection(cameraPos) {
             const aspect = canvas.width / canvas.height;
-            const projMatrix = mat4.perspective([], 60 * Math.PI / 180, aspect, 0.1, 200);
+            const projMatrix = mat4.perspective([], 60 * Math.PI / 180, aspect, cameraNearFar[0], cameraNearFar[1]);
             //const viewMatrix = mat4.lookAt([], cameraPos, [0, 0, 0], [0, 1, 0]);
             var xRotation = mat4.create();
             mat4.rotateY(xRotation, xRotation, roll);
@@ -271,8 +546,56 @@
             var viewMatrix = mat4.create();
             mat4.multiply(viewMatrix, yRotation, xRotation);
             viewMatrix[14] = -translate;
-            const viewProjection = mat4.multiply([], projMatrix, viewMatrix);
-            return viewProjection;
+            const projViewMatrix = mat4.multiply([], projMatrix, viewMatrix);
+            return  { projViewMatrix, projMatrix, viewMatrix };
+        }
+
+        function clearFBO(){
+            regl.clear({
+                color: [1, 1, 1, 1],
+                depth: 1,
+                framebuffer : fbo_depth
+            });
+            regl.clear({
+                color: [1, 1, 1, 1],
+                depth: 1,
+                framebuffer : fbo_a
+            });
+            regl.clear({
+                color: [1, 1, 1, 1],
+                depth: 1,
+                framebuffer : fbo_b
+            });
+            regl.clear({
+                color: [1, 1, 1, 1],
+                depth: 1,
+                framebuffer : fbo_c
+            });
+            regl.clear({
+                color: [1, 1, 1, 1],
+                depth: 1,
+                framebuffer : fbo_d
+            });
+            regl.clear({
+                color: [1, 1, 1, 1],
+                depth: 1,
+                framebuffer : fbo_e
+            });
+            regl.clear({
+                color: [1, 1, 1, 1],
+                depth: 1,
+                framebuffer : fbo_f
+            });
+            regl.clear({
+                color: [1, 1, 1, 1],
+                depth: 1,
+                framebuffer : fbo_g
+            });
+            regl.clear({
+                color: [0, 0, 0, 1],
+                depth: 1,
+                framebuffer : fbo_scene
+            });
         }
 
         //鼠标事件相关

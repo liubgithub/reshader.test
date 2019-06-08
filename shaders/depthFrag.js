@@ -12,8 +12,8 @@ const depth_frag = `
         rgbaDepth -= rgbaDepth.rrgb * bitMask; // Cut off the value which do not fit in 8 bits
         return rgbaDepth;
     }
-    float near = 0.1;
-    float far  = 1000.0;
+    float near = 1.0;
+    float far  = 100.0;
 
     float LinearizeDepth(float depth)
     {
@@ -22,7 +22,8 @@ const depth_frag = `
     }
     void main() {
         float depth = LinearizeDepth(gl_FragCoord.z) / far;
-        gl_FragColor = vec4(depth, depth, depth, 1.0);
+        //gl_FragColor = pack(depth);
+        gl_FragColor = vec4(vec3(depth), 1.0);
     }
 `;
 export default depth_frag;
