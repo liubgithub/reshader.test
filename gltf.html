@@ -83,6 +83,17 @@
             }
         };
 
+        const fbo_edg =  regl.framebuffer({
+            color: regl.texture({
+                width: canvas.width,
+                height: canvas.height,
+                wrap: 'clamp',
+                mag : 'linear',
+                min : 'linear'
+            }),
+            depth: true
+        });
+        
         const fbo_depth = regl.framebuffer({
             color: regl.texture({
                 width: canvas.width,
@@ -163,16 +174,16 @@
             }),
             depth: true
         });
-        const fbo_scene = regl.framebuffer({
-            color: regl.texture({
-                width: canvas.width,
-                height: canvas.height,
-                wrap: 'clamp',
-                mag : 'linear',
-                min : 'linear'
-            }),
-            depth: true
-        });
+        // const fbo_scene = regl.framebuffer({
+        //     color: regl.texture({
+        //         width: canvas.width,
+        //         height: canvas.height,
+        //         wrap: 'clamp',
+        //         mag : 'linear',
+        //         min : 'linear'
+        //     }),
+        //     depth: true
+        // });
         const depth_shader = new reshader.MeshShader({
             vert : depth_vert,
             frag : depth_frag,
@@ -285,7 +296,18 @@
             positionAttribute : 'POSITION',
             extraCommandProps: { viewport,
                 blend: {
-                    enable: true
+                    enable: true,
+                    func: {
+                        srcRGB: 'src alpha',
+                        srcAlpha: 'src alpha',
+                        dstRGB: 1,
+                        dstAlpha: 1
+                    },
+                    equation: {
+                        rgb: 'add',
+                        alpha: 'add'
+                    },
+                    color: [0, 0, 0, 0]
                 }
             }
         });
@@ -297,10 +319,7 @@
                 'sceneTexture',
             ],
             positionAttribute : 'POSITION',
-            extraCommandProps: { viewport, 
-                blend: {
-                    enable: true
-                }
+            extraCommandProps: { viewport
             }
         });
 
@@ -378,11 +397,11 @@
         function drawEdageFBO() {
             renderer.render(Edage_shader, {
                 'edgeStrength' : 3,
-                'edgeGlow' : 0,
+                'edgeGlow' : 1,
                 'maskTexture' : fbo_b,
                 'edgeTexture1' : fbo_d,
                 'edgeTexture2' : fbo_g
-            }, quadScene);
+            }, quadScene, fbo_edg);
         }
        
         function drawSceneFBO(matrix) {      
@@ -396,20 +415,20 @@
                 // 有一个uniform会自动设置：model， 值是mesh的localTransform
                 material.getUniforms(),
                 scene,
-                fbo_scene  //最后一个参数是framebuffer，可以指定framebuffer目标
+                fbo_edg  //最后一个参数是framebuffer，可以指定framebuffer目标
             );
         }
 
         function drawQuadScene() {
             renderer.render(QuadScene_shader, {
-                'sceneTexture' : fbo_scene,
+                'sceneTexture' : fbo_edg,
             }, quadScene);
         }
 
         function drawAll() {
             const matrix = getViewProjection(camPos, canvas.width / canvas.height);
             clearFBO();
-            drawSceneFBO(matrix);
+           drawSceneFBO(matrix);
             drawDepthFBO(matrix);
             drawAFBO(matrix);
             drawBFBO();
@@ -418,8 +437,8 @@
             drawEFBO();
             drawFFBO();
             drawGFBO();
-            drawQuadScene();
             drawEdageFBO();
+            drawQuadScene();
             requestAnimationFrame(drawAll);
         }
 
@@ -594,7 +613,7 @@
             regl.clear({
                 color: [0, 0, 0, 1],
                 depth: 1,
-                framebuffer : fbo_scene
+                framebuffer : fbo_edg
             });
         }
 
