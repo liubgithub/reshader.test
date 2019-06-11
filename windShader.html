@@ -20,11 +20,8 @@
 <script src="js/maptalksgl-dev.js" type="text/javascript"></script>
 
 <body>
-    <canvas id="canvas" width=1000 height=800 class="container" style="border : 1px solid;"></canvas>
-    <canvas id='drawScreenCanvas' width=250 height=200 style="border : 1px solid"></canvas>
-    <canvas id='updateParticlesCanvas' width=250 height=200 style="border : 1px solid"></canvas>
-    <canvas id='backgroundTextureCanvas' width=250 height=200 style="border : 1px solid"></canvas>
-    <!-- <script src="./common/regl.js" type="text/javascript"></script> -->
+    <canvas id="canvas" width=1000 height=800 class="container" style="border : 1px solid;position:absolute"></canvas>
+    <canvas id="coastline" width = 1000 height = 800; style="background-color:black"></canvas>
     <script type="module">
         import drawVert from './glsl/drawVert.js';
         import drawFrag from './glsl/drawFrag.js';
@@ -53,8 +50,6 @@
             vMin: -21.57,
             width: 360
         }
-        const drawScreenCanvas = document.getElementById('drawScreenCanvas');
-        const updateParticlesCanvas = document.getElementById('updateParticlesCanvas');
         const fadeOpacity = 0.996; // how fast the particle trails fade on each frame
         const speedFactor = 0.25; // how fast the particles move
         const dropRate = 0.003; // how often the particles move to a random place
@@ -73,7 +68,7 @@
                 'OES_standard_derivatives'
             ]
         });
-
+        SetParticlesCount(65536);
         canvas.onresize = resize;
         const viewport = {
             x: 0,
@@ -96,7 +91,9 @@
                 'u_wind_min',
                 'u_wind_max'
             ],
-            extraCommandProps: { viewport },
+            extraCommandProps: { viewport,
+                dither: true
+            },
             defines: {}
         });
 
@@ -107,7 +104,9 @@
                 'u_screen',
                 'u_opacity'
             ],
-            extraCommandProps: { viewport },
+            extraCommandProps: { viewport,
+                dither: true
+            },
             defines: {}
         });
 
@@ -131,7 +130,8 @@
                     y: 0,
                     width : particleStateResolution,
                     height : particleStateResolution
-                }
+                },
+                dither: true
              },
             defines: {}
         });
@@ -152,7 +152,7 @@
 
         const renderer = new reshader.Renderer(regl);
         resize();
-        SetParticlesCount(65536);
+        const quadScene = getQuadScene();
         const framebuffer = regl.framebuffer({
             color: backgroundTexture,
             depth: true
@@ -180,9 +180,9 @@
         //主绘制方法
         function render() {
             drawScreen();
-            //将framebuffer的数据绘制到另外的canvas上
-            // copyFrameBuffer(drawScreenCanvas, canvas.width, canvas.height);
             updateParticles();
+            //将framebuffer的数据绘制到另外的canvas上
+            // copyFrameBuffer(drawScreenCanvas, canvas.width, canvas.height);           
             //将framebuffer的数据绘制到另外的canvas上
             // copyFrameBuffer(updateParticlesCanvas, particleStateResolution, particleStateResolution);
         }
@@ -192,7 +192,6 @@
                 color: screenTexture
             });
             drawParticles();
-            const quadScene = getQuadScene();
             renderer.render(screenShader, {
                 u_screen: backgroundTexture,
                 u_opacity: fadeOpacity
@@ -221,9 +220,7 @@
 
         function updateParticles() {
             framebuffer({
-                color: particleStateTexture1,
-                width : particleStateResolution,
-                height : particleStateResolution
+                color: particleStateTexture1
             });
             const quadScene = getQuadScene();
             renderer.render(updateSHader, {

@@ -8,7 +8,7 @@ precision highp int;
 #define USE_FOG 1
 #define FOG_EXP2
 #define BONE_TEXTURE
-#define USE_SIZEATTENUATION
+#define USE_SIZEATTENUATION 1
 uniform mat4 modelMatrix;
 uniform mat4 modelViewMatrix;
 uniform mat4 projectionMatrix;
@@ -161,10 +161,11 @@ void main() {
     vec4 mvPosition = modelViewMatrix * vec4( transformed, 1.0 );
     gl_Position = projectionMatrix * mvPosition;
     gl_PointSize = size;
-    #ifdef USE_SIZEATTENUATION
-        bool isPerspective = ( projectionMatrix[ 2 ][ 3 ] == - 1.0 );
-        if ( isPerspective ) gl_PointSize *= ( scale / - mvPosition.z );
-    #endif
+    //#ifdef USE_SIZEATTENUATION
+    //    bool isPerspective = ( projectionMatrix[ 2 ][ 3 ] == - 1.0 );
+    //    if ( isPerspective ) gl_PointSize *= ( scale / - mvPosition.z );
+    //#endif
+    gl_PointSize *= ( scale / - mvPosition.z );
     #ifdef USE_LOGDEPTHBUF
         #ifdef USE_LOGDEPTHBUF_EXT
             vFragDepth = 1.0 + gl_Position.w;
