@@ -20,15 +20,15 @@ float rand(const vec2 co) {
 
 // wind speed lookup; use manual bilinear filtering based on 4 adjacent pixels for smooth interpolation
 vec2 lookup_wind(const vec2 uv) {
-    // return texture2D(u_wind, uv).rg; // lower-res hardware filtering
-    vec2 px = 1.0 / u_wind_res;
-    vec2 vc = (floor(uv * u_wind_res)) * px;
-    vec2 f = fract(uv * u_wind_res);
-    vec2 tl = texture2D(u_wind, vc).rg;
-    vec2 tr = texture2D(u_wind, vc + vec2(px.x, 0)).rg;
-    vec2 bl = texture2D(u_wind, vc + vec2(0, px.y)).rg;
-    vec2 br = texture2D(u_wind, vc + px).rg;
-    return mix(mix(tl, tr, f.x), mix(bl, br, f.x), f.y);
+    return texture2D(u_wind, uv).rg; // lower-res hardware filtering
+    // vec2 px = 1.0 / u_wind_res;
+    // vec2 vc = (floor(uv * u_wind_res)) * px;
+    // vec2 f = fract(uv * u_wind_res);
+    // vec2 tl = texture2D(u_wind, vc).rg;
+    // vec2 tr = texture2D(u_wind, vc + vec2(px.x, 0)).rg;
+    // vec2 bl = texture2D(u_wind, vc + vec2(0, px.y)).rg;
+    // vec2 br = texture2D(u_wind, vc + px).rg;
+    // return mix(mix(tl, tr, f.x), mix(bl, br, f.x), f.y);
 }
 
 void main() {
@@ -61,8 +61,8 @@ void main() {
 
     // encode the new particle position back into RGBA
     gl_FragColor = vec4(
-         fract(pos * 255.0),
-         floor(pos * 255.0) / 255.0);
+        fract(pos * 255.0),
+        floor(pos * 255.0) / 255.0);
 }`;
 
 export default updateFrag;

@@ -10,24 +10,24 @@
         height: 100%;
         width: 100%
     }
-
-    .container {
-        width: 1000px;
-        height: 800px
-    }
 </style>
 <script type="text/javascript" src="./js/maptalks.js"></script>
 <script src="js/maptalksgl-dev.js" type="text/javascript"></script>
 
 <body>
-    <canvas id="canvas" width=1000 height=800 class="container" style="border : 1px solid;position:absolute"></canvas>
-    <canvas id="coastline" width = 1000 height = 800; style="background-color:black"></canvas>
+    <canvas id="canvas" width = 900 height = 900 class="container" style="border : 1px solid;position:absolute"></canvas>
+    <canvas id="coastline" width = 900 height = 900; style="background-color:black"></canvas>
+    <select id="level"></select>
     <script type="module">
         import drawVert from './glsl/drawVert.js';
         import drawFrag from './glsl/drawFrag.js';
         import quadVert from './glsl/quadVert.js';
         import screenFrag from './glsl/screenFrag.js';
         import updateFrag from './glsl/updateFrag.js';
+        import windVert from './glsl/windVert.js';
+        import windFrag from './glsl/windFrag.js';
+        const level = 1;
+        const wholeSize = 900 * Math.pow(2, level);
         const { createREGL, mat4, reshader } = maptalksgl;
         const defaultRampColors = {
             0.0: '#3288bd',
@@ -57,7 +57,7 @@
         let colorRampTexture, backgroundTexture, screenTexture, particleStateTexture0, particleStateTexture1, windTexture;
         let particleStateResolution;
         let particleIndices;
-
+        
         const regl = createREGL({
             canvas: canvas,
             extensions: [
@@ -68,18 +68,26 @@
                 'OES_standard_derivatives'
             ]
         });
-        SetParticlesCount(65536);
+        const fbo = regl.framebuffer({
+            color: regl.texture({
+                width: canvas.width,
+                height: canvas.height
+            }),
+            depth: true
+        })
+        SetParticlesCount(256 * 256);
         canvas.onresize = resize;
         const viewport = {
             x: 0,
             y: 0,
             width: () => {
-                return canvas.width;
+                return wholeSize;
             },
             height: () => {
-                return canvas.height;
+                return wholeSize;
             }
         };
+
         const drawShader = new reshader.MeshShader({
             vert: drawVert,
             frag: drawFrag,
@@ -106,6 +114,23 @@
             ],
             extraCommandProps: { viewport,
                 dither: true
+            },
+            defines: {}
+        });
+        
+        const windShader = new reshader.MeshShader({
+            vert : windVert,
+            frag : windFrag,
+            uniforms : [
+                'u_texture'
+            ],
+            extraCommandProps: { 
+                viewport : {
+                    x : 0,
+                    y : 0,
+                    width : canvas.width, 
+                    height : canvas.height
+                }
             },
             defines: {}
         });
@@ -137,7 +162,7 @@
         });
 
         const image = new Image();
-        image.src = './2016112000.png'
+        image.src = './2016112000.png';
         image.onload = () => {
             windData.image = image;
             windTexture = regl.texture({
@@ -146,7 +171,7 @@
                 min: 'linear'
             });
         }
-
+        addSelect();
         setColorRamp(defaultRampColors);
 
 
@@ -154,7 +179,10 @@
         resize();
         const quadScene = getQuadScene();
         const framebuffer = regl.framebuffer({
-            color: backgroundTexture,
+            color: regl.texture({
+                width : 1,
+                height : 1
+            }),
             depth: true
         });
         const raf = function () {
@@ -181,13 +209,13 @@
         function render() {
             drawScreen();
             updateParticles();
-            //将framebuffer的数据绘制到另外的canvas上
-            // copyFrameBuffer(drawScreenCanvas, canvas.width, canvas.height);           
-            //将framebuffer的数据绘制到另外的canvas上
-            // copyFrameBuffer(updateParticlesCanvas, particleStateResolution, particleStateResolution);
         }
-
+        
         function drawScreen() {
+            // screenTexture({
+            //     width : wholeSize / 2,
+            //     height : wholeSize / 2
+            // })
             framebuffer({
                 color: screenTexture
             });
@@ -196,10 +224,17 @@
                 u_screen: backgroundTexture,
                 u_opacity: fadeOpacity
             }, quadScene, framebuffer);
-            renderer.render(screenShader, {
-                u_screen: screenTexture,
-                u_opacity: 1.0
-            }, quadScene);
+            // renderer.render(screenShader, {
+            //     u_screen: screenTexture,
+            //     u_opacity: 1.0
+            // }, quadScene);
+            const windScene = getWindScene();
+            renderer.render(windShader, {
+                u_texture : screenTexture
+            }, windScene, fbo);
+            renderer.render(windShader, {
+                u_texture : screenTexture
+            }, windScene);
             const temp = backgroundTexture;
             backgroundTexture = screenTexture;
             screenTexture = temp;
@@ -242,7 +277,48 @@
 
         function getQuadScene() {
             const plane = new reshader.Geometry({
-                a_pos: [0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1]
+                a_pos: [0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1],
+                uv : [0, 0, 
+                1, 0, 
+                0, 1, 
+                0, 1, 
+                1, 0, 
+                1, 1]
+            }, 6, 0, {
+                    primitive: 'triangle',
+                    positionAttribute: 'a_pos',
+                    positionSize: 2
+                });
+            const planeMesh = new reshader.Mesh(plane);
+            const scene = new reshader.Scene([planeMesh]);
+            return scene;
+        }
+
+        function getWindScene() {
+            const plane = new reshader.Geometry({
+                a_pos: [-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1],
+                // uv : [0.5 - 1 / Math.pow(2, level), 0.5 - 1 / Math.pow(2, level), 
+                // 0.5 + 1 / Math.pow(2, level), 0.5 - 1 / Math.pow(2, level), 
+                // 0.5 - 1 / Math.pow(2, level), 0.5 + 1 / Math.pow(2, level), 
+                // 0.5 - 1 / Math.pow(2, level), 0.5 + 1 / Math.pow(2, level), 
+                // 0.5 + 1 / Math.pow(2, level), 0.5 - 1 / Math.pow(2, level), 
+                // 0.5 + 1 / Math.pow(2, level), 0.5 + 1 / Math.pow(2, level)]
+                uv : [
+                    0.25, 0.25,
+                    0.75, 0.25,
+                    0.25, 0.75,
+                    0.25, 0.75,
+                    0.75, 0.25,
+                    0.75, 0.75
+                ]
+                // uv : [
+                //     0.375, 0.375,
+                //     0.625, 0.375,
+                //     0.375, 0.625,
+                //     0.375, 0.625,
+                //     0.625, 0.375,
+                //     0.625, 0.625
+                // ]
             }, 6, 0, {
                     primitive: 'triangle',
                     positionAttribute: 'a_pos',
@@ -323,7 +399,7 @@
             }
         }
 
-        function resize(e) {
+        function _resize(e) {
             const width = canvas.width;
             const height = canvas.height;
             const emptyPixels = new Uint8Array(width * height * 4);
@@ -343,6 +419,34 @@
                 height,
                 data: emptyPixels
             });
+        }
+
+        function resize(e) {
+            // const width = canvas.width;
+            // const height = canvas.height;
+            const emptyPixels = new Uint8Array(wholeSize * wholeSize * 4);
+            backgroundTexture = regl.texture({
+                width : wholeSize,
+                height : wholeSize,
+                data: emptyPixels
+            });
+            screenTexture = regl.texture({
+                width : wholeSize,
+                height : wholeSize,
+                data: emptyPixels
+            });
+        }
+
+        function addSelect() {
+            const selelct = document.getElementById('level');
+            for (let i = 0;i < 10; i++) {
+                const option = document.createElement('option');
+                option.innerText = i * 2;
+                selelct.appendChild(option);
+            }
+            selelct.onchange = function(e) {
+                alert(e.target.value);
+            }
         }
     </script>
 </body>

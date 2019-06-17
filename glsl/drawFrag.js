@@ -17,5 +17,6 @@ void main() {
         floor(16.0 * speed_t) / 16.0);
 
     gl_FragColor = texture2D(u_color_ramp, ramp_pos);
+    // gl_FragColor = vec4(0.3, 0.5, 0.8, 1.0);
 }`;
 export default drawFrag;
