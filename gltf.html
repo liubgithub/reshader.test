@@ -17,11 +17,11 @@
         import outlineVert from './shaders/quadVert.js';
         import depth_vert from './shaders/depthVert.js';
         import depth_frag from './shaders/depthFrag.js';
-        import A_vert from './shaders/AVert.js';
-        import A_frag from './shaders/AFrag.js';
-        import B_frag from './shaders/BFrag.js';
-        import C_frag from './shaders/CFrag.js';
-        import D_frag from './shaders/DFrag.js';
+        import A_vert from './shaders/bloom/AVert.js';
+        import A_frag from './shaders/bloom/AFrag.js';
+        import B_frag from './shaders/bloom/BFrag.js';
+        import C_frag from './shaders/bloom/CFrag.js';
+        import D_frag from './shaders/bloom/DFrag.js';
         import Edage_frag from './shaders/EdageFrag.js';
         import QuadScene_frag from './shaders/QuadSceneFrag.js';
         const { createREGL, mat4, reshader } = maptalksgl;
@@ -83,7 +83,7 @@
             }
         };
 
-        const fbo_edg =  regl.framebuffer({
+        const fbo_scene =  regl.framebuffer({
             color: regl.texture({
                 width: canvas.width,
                 height: canvas.height,
@@ -174,16 +174,7 @@
             }),
             depth: true
         });
-        // const fbo_scene = regl.framebuffer({
-        //     color: regl.texture({
-        //         width: canvas.width,
-        //         height: canvas.height,
-        //         wrap: 'clamp',
-        //         mag : 'linear',
-        //         min : 'linear'
-        //     }),
-        //     depth: true
-        // });
+
         const depth_shader = new reshader.MeshShader({
             vert : depth_vert,
             frag : depth_frag,
@@ -352,7 +343,7 @@
         function drawCFBO() {
             renderer.render(C_shader, {
                 'texSize' : [canvas.width / 2, canvas.height / 2],
-                'visibleEdgeColor' : [1, 1, 1],
+                'visibleEdgeColor' : [1, 1, 0],
                 'hiddenEdgeColor' : [0.1000, 0.0400, 0.0200],
                 'maskTexture' : fbo_b
             }, quadScene, fbo_c);
@@ -415,7 +406,7 @@
                 // 有一个uniform会自动设置：model， 值是mesh的localTransform
                 material.getUniforms(),
                 scene,
-                fbo_edg  //最后一个参数是framebuffer，可以指定framebuffer目标
+                fbo_scene  //最后一个参数是framebuffer，可以指定framebuffer目标
             );
         }
 
@@ -429,7 +420,7 @@
             const matrix = getViewProjection(camPos, canvas.width / canvas.height);
             clearFBO();
            drawSceneFBO(matrix);
-            drawDepthFBO(matrix);
+            // drawDepthFBO(matrix);
             drawAFBO(matrix);
             drawBFBO();
             drawCFBO();

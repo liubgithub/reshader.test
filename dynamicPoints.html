@@ -22,12 +22,14 @@
 
 <body>
     <canvas id="canvas" width=1000 height=800 class="container" style="border : 1px solid"></canvas>
+    <input id="enableAnimation" type="button" value="开启动画"/>
+    <input id="actionButton" type="button" value="下落"/>
     <!-- <script src="./common/regl.js" type="text/javascript"></script> -->
     <script type="module">
         import quadVert from './shaders/quadVert.js';
-        import pointsVert from './shaders/PointsVert.js';
-        import pointsFrag from './shaders/PointsFrag.js';
-        import bloomPointsFrag from './shaders/BloomPointsFrag.js';
+        import pointsVert from './shaders/BloomPoints/PointsVert.js';
+        import pointsFrag from './shaders/BloomPoints/PointsFrag.js';
+        import bloomPointsFrag from './shaders/BloomPoints/BloomPointsFrag.js';
         import quadSceneFrag from './shaders/QuadSceneFrag.js';
         const { createREGL, mat4, reshader } = maptalksgl;
         const MODES = ['points', 'lines', 'line strip', 'line loop', 'triangles', 'triangle strip', 'triangle fan'];
@@ -41,6 +43,8 @@
         var wheelSpeed = 1.04;
         let lastMouseX = null;
         let lastMouseY = null;
+        let enableAnim = false;
+        let action = 0;
         const TEXTURE_SAMPLER = {
             '9728': 'nearest',
             '9729': 'linear',
@@ -186,13 +190,13 @@
             const uniforms = {
                 'projectionMatrix': matrix.projMatrix,
                 'viewMatrix': matrix.viewMatrix,
-                'size': 0.02,
+                'size': 0.01,
                 'scale': 468.5,
                 'toneMappingExposure': 1,
                 'diffuse': [1, 0.8667, 0.2667],
                 'opacity': 1,
                 'fogColor': [0, 0.0039, 0.0157],
-                'fogDensity': 0.1
+                'fogDensity': 0.15
             }
             renderer.render(
                 SceneShader,
@@ -231,7 +235,9 @@
             regl.clear({
                 color: [0, 0.0039, 0.0157, 1]
             });
-            updatePaticles();
+            if (enableAnim) {
+                updatePaticles();
+            }
             clearFBO();
             drawSceneFBO(matrix);
             drawBloomPoints();
@@ -250,11 +256,43 @@
         }
 
         render();
+        let current = 0;
+        let end = 180;
         function updatePaticles() {
+            if (current >= end) {
+                current = 0;
+                return;
+            }
+            const meshes = scene.getMeshes();
+            for ( var i = 0; i < meshes.length; i ++ ) {
+                var mesh = meshes[i];
+                const speed = (mesh.maxY - mesh.minY) / 180;
+                var positions = mesh.geometry.data['POSITION'];
+                var initialPosition = mesh.geometry.data['initialPosition'];
+                const maxDistance = mesh.maxY - mesh.minY;
+                for (let i = 0; i < positions.length; i+=3) {
+                    const px = positions[i];
+                    const py = positions[i + 1];
+                    const pz = positions[i + 2];
+                    if (py > mesh.minY && action == 0) {
+                        const dy = py - mesh.minY;
+                        positions[i + 1] = initialPosition[i + 1] - speed * current;
+                        positions[i] = positions[i] + (Math.random() * 2 - 1) * 0.01;
+                        positions[i + 2] += (Math.random() * 2 - 1) * 0.01;
+                    } else if(action == 1) {
+                        positions[i + 1] = positions[i + 1] < initialPosition[i + 1] ? mesh.minY + speed * current : initialPosition[i + 1];
+                        positions[i] = positions[i] + (Math.random() * 2 - 1) * 0.01;
+                        positions[i + 2] += (Math.random() * 2 - 1) * 0.01;
+                    }
+                }
+            }
+            current++;
+        }
+        function _updatePaticles() {
             delta = delta < 2 ? delta : 2;
             const meshes = scene.getMeshes();
             for ( var j = 0; j < meshes.length; j ++ ) {
-                var mesh = meshes[ j ];
+                var mesh = meshes[j];
                 var positions = mesh.geometry.data['POSITION'];
                 var initialPositions = mesh.geometry.data['initialPosition'];
                 var count = positions.length;
@@ -271,16 +309,16 @@
                     var pz = positions[i + 2];
                     // falling down
                     if ( mesh.direction < 0 ) {
-                        if ( py > 0 ) {
+                        if ( py > mesh.minY ) {
                             // positions.setXYZ(
                             //     i,
                             //     px + 1.5 * ( 0.50 - Math.random() ) * mesh.speed * delta,
                             //     py + 3.0 * ( 0.25 - Math.random() ) * mesh.speed * delta,
                             //     pz + 1.5 * ( 0.50 - Math.random() ) * mesh.speed * delta
                             // );
-                            positions[i] = px + 1.5 * ( 0.50 - Math.random() ) * mesh.speed * delta;
-                            positions[i + 1] = py + 3.0 * ( 0.25 - Math.random() ) * mesh.speed * delta;
-                            positions[i + 2] = pz + 1.5 * ( 0.50 - Math.random() ) * mesh.speed * delta;
+                            positions[i] = px + 1.5 * ( 0.0050 - Math.random() ) * mesh.speed * delta;
+                            positions[i + 1] = py + 3.0 * ( 0.0025 - Math.random() ) * mesh.speed * delta;
+                            positions[i + 2] = pz + 1.5 * ( 0.0050 - Math.random() ) * mesh.speed * delta;
                         } else {
                             mesh.verticesDown += 1;
                         }
@@ -301,9 +339,9 @@
                             //     py - ( py - iy ) / dy * mesh.speed * delta * ( 1 + Math.random() ),
                             //     pz - ( pz - iz ) / dz * mesh.speed * delta * ( 0.85 - Math.random() )
                             // );
-                            positions[i] = px - (px - ix) / dx * mesh.speed * delta * (0.85 - Math.random());
-                            positions[i + 1] = py - (py - iy) / dy * mesh.speed * delta * (1 + Math.random());
-                            positions[i + 2] = pz - (pz - iz) / dz * mesh.speed * delta * (0.85 - Math.random());
+                            positions[i] = px - (px - ix) / dx * mesh.speed * delta * (0.0085 - Math.random());
+                            positions[i + 1] = py - (py - iy) / dy * mesh.speed * delta * (0.01 + Math.random());
+                            positions[i + 2] = pz - (pz - iz) / dz * mesh.speed * delta * (0.0085 - Math.random());
                         } else {
                             mesh.verticesUp += 1;
                         }
@@ -313,22 +351,22 @@
                 if ( mesh.verticesDown >= count ) {
                     if ( mesh.delay <= 0 ) {
                         mesh.direction = 1;
-                        mesh.speed = 5;
+                        mesh.speed = 0.05;
                         mesh.verticesDown = 0;
-                        mesh.delay = 320;
+                        mesh.delay = 3.2;
                     } else {
-                        mesh.delay -= 1;
+                        mesh.delay -= 0.01;
                     }
                 }
                 // all vertices up
                 if ( mesh.verticesUp >= count ) {
                     if ( mesh.delay <= 0 ) {
                         mesh.direction = - 1;
-                        mesh.speed = 15;
+                        mesh.speed = 0.15;
                         mesh.verticesUp = 0;
-                        mesh.delay = 120;
+                        mesh.delay = 1.2;
                     } else {
-                        mesh.delay -= 1;
+                        mesh.delay -= 0.01;
                     }
 
                 }
@@ -405,12 +443,9 @@
                                 const modelGeometry = createGeometry(primitive);
                                 //modelGeometry.generateBuffers(this.regl);//会抛elements must be array to build unique vertex.的异常，
                                 const modelMesh = new reshader.Mesh(modelGeometry);
-                                modelMesh.verticesDown = 0;
-                                modelMesh.verticesUp = 0;
-                                modelMesh.direction = 0;
-                                modelMesh.speed = 15;
-                                modelMesh.delay = Math.floor(200 + 200 * Math.random());
-					            modelMesh.start = Math.floor( 100 + 200 * Math.random());
+                                setYMaxMin(modelMesh);
+                                modelMesh.delay = Math.floor(2 + 2 * Math.random());
+					            modelMesh.start = Math.floor( 1 + 2 * Math.random());
                                 modelMeshes.push(modelMesh);
                                 // setPhongTexture(primitive.material, modelMesh);
                                 modelMesh.setLocalTransform(transformMat);
@@ -421,6 +456,16 @@
                     return scene;
                 });
             });
+        }
+        
+        function setYMaxMin(mesh) {
+            var positions = mesh.geometry.data['POSITION'];
+            const yPositions = [];
+            for(let i = 1;i < positions.length; i+=3) {
+                yPositions.push(positions[i]);
+            }
+            mesh.maxY = Math.max.apply(null, yPositions);
+            mesh.minY = Math.min.apply(null, yPositions);
         }
 
         function createGeometry(primitive) {
@@ -520,6 +565,15 @@
             camPos = [-translate * Math.sin(roll) * Math.cos(-pitch),
             -translate * Math.sin(-pitch),
             translate * Math.cos(roll) * Math.cos(-pitch)];
+        }
+
+        enableAnimation.onclick = function() {
+            enableAnim = !enableAnim;
+        }
+
+        actionButton.onclick = function() {
+             action = action === 0 ? 1 : 0;
+             actionButton.value = action === 0 ? '下落' : '上升';
         }
     </script>
 </body>

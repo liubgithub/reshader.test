@@ -10,14 +10,15 @@
         height: 100%;
         width: 100%
     }
+    #canvas, #coastline {width:100%;height: 100%;position:absolute}
 </style>
 <script type="text/javascript" src="./js/maptalks.js"></script>
 <script src="js/maptalksgl-dev.js" type="text/javascript"></script>
 
 <body>
-    <canvas id="canvas" width = 1920 height = 900 class="container" style="border : 1px solid;position:absolute"></canvas>
-    <canvas id="coastline" width = 1920 height = 900; style="background-color:black"></canvas>
-    <select id="level"></select>
+    <canvas id="coastline" style="background-color:black"></canvas>
+    <canvas id="canvas"></canvas>
+    <!-- <select id="level"></select> -->
     <script type="module">
         import drawVert from './glsl/drawVert.js';
         import drawFrag from './glsl/drawFrag.js';
@@ -26,11 +27,20 @@
         import updateFrag from './glsl/updateFrag.js';
         import windVert from './glsl/windVert.js';
         import windFrag from './glsl/windFrag.js';
+        canvas.width = canvas.clientWidth * 1;
+        canvas.height = canvas.clientHeight * 1;
         let level = 0.0;
-        const leftbuttom = [20, 30];
-        const righttop = [120, 60];
-        // const center = [120.0, 0.0];
-        // const canvas.width = 900;
+        // const extent = [60, 120, 20, 60]
+        // const center = [90.0, 40.0];
+        // const extent = [35.759509067023444, 174.401538069746, 4.373834406312583, 58.69578572755441];
+        // const extent = [114.41101074218751, 117.04772949218751, 25.74859619140625, 27.035369873046875];
+        // const extent = [-84.63240144964402, 54.00962753479724, -33.233741806900795, 29.906699358104493];
+        // const extent = [-180, 0, 0, 90];
+        // const extent = [0, 180, 0, 90];
+        // const extent = [-180, 0, -90, 0];
+        // const extent = [0, 180, -90, 0];
+        const extent = [-180, 180, -90, 90];
+        // const extent = [-60, 120, -60, 30];
         const { createREGL, mat4, reshader } = maptalksgl;
         const defaultRampColors = {
             0.0: '#3288bd',
@@ -96,9 +106,7 @@
             frag: drawFrag,
             uniforms: [
                 'u_wind',
-                'res',
-                'level',
-                'center',
+                'extent',
                 'u_particles',
                 'u_color_ramp',
                 'u_particles_res',
@@ -145,9 +153,7 @@
             vert: quadVert,
             frag: updateFrag,
             uniforms: [
-                'res',
-                'center',
-                'level',
+                'extent',
                 'u_wind',
                 'u_particles',
                 'u_rand_seed',
@@ -184,7 +190,7 @@
                 min: 'linear'
             });
         }
-        addSelect();
+        // addSelect();
         setColorRamp(defaultRampColors);
 
 
@@ -237,9 +243,7 @@
             const particlesScene = getParticlesScene();
             renderer.render(drawShader,
                 {
-                    res : [canvas.width, canvas.height],
-                    center : center,
-                    level : level,
+                    extent : [extent[0], extent[1], -extent[3], -extent[2]],
                     u_wind: windTexture,
                     u_particles: particleStateTexture0,
                     u_color_ramp: colorRampTexture,
@@ -255,9 +259,7 @@
             });
             const quadScene = getQuadScene();
             renderer.render(updateSHader, {
-                res : [canvas.width, canvas.height],
-                center : center,
-                level : level,
+                extent : [extent[0], extent[1], -extent[3], -extent[2]],
                 u_wind: windTexture,
                 u_particles: particleStateTexture0,
                 u_rand_seed: Math.random(),
@@ -302,6 +304,21 @@
                 0, 1, 
                 1, 0, 
                 1, 1]
+                // uv : [
+                //     // 0.25, 0.25,
+                //     // 0.75, 0.25,
+                //     // 0.25, 0.75,
+                //     // 0.25, 0.75,
+                //     // 0.75, 0.25,
+                //     // 0.75, 0.75
+
+                //     0.1, 0.6,
+                //     0.1 + 1 / ratio, 0.6,
+                //     0.1, 0.6 + 1 / ratio,
+                //     0.1, 0.6 + 1 / ratio,
+                //     0.1 + 1 / ratio, 0.6,
+                //     0.1 + 1 / ratio, 0.6 + 1 / ratio
+                // ]
             }, 6, 0, {
                     primitive: 'triangle',
                     positionAttribute: 'a_pos',
@@ -422,17 +439,17 @@
         }
 
         function resize(e) {
-            // const width = canvas.width;
-            // const height = canvas.height;
+            const width = canvas.width;
+            const height = canvas.height;
             const emptyPixels = new Uint8Array(canvas.width * canvas.height * 4);
             backgroundTexture = regl.texture({
-                width : canvas.width,
-                height : canvas.height,
+                width,
+                height,
                 data: emptyPixels
             });
             screenTexture = regl.texture({
-                width : canvas.width,
-                height : canvas.height,
+                width,
+                height,
                 data: emptyPixels
             });
         }
@@ -449,15 +466,6 @@
 
                 SetParticlesCount(256 * 256 / Math.pow(2, level));
             }
-        }
-
-        function wgs84ToMercator(xy) {
-            // convert to angle
-            let y = -180.0 * xy.y + 90.0;
-            // use the formule to convert
-            y = (180.0 - (180.0 / PI * Math.log(Math.tan(PI / 4.0 + y * PI / 360.0)))) / 360.0;
-            // pass x through, as it doesn't change
-            return { x : xy.x, y};
         }
     </script>
 </body>
