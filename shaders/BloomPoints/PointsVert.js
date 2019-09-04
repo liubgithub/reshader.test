@@ -16,10 +16,10 @@ uniform mat4 viewMatrix;
 uniform mat3 normalMatrix;
 uniform vec3 cameraPosition;
 attribute vec3 POSITION;
-attribute vec3 normal;
+attribute vec3 NORMAL;
 attribute vec2 uv;
 #ifdef USE_TANGENT
-    attribute vec4 tangent;
+    attribute vec4 TANGENT;
 #endif
 #ifdef USE_COLOR
     attribute vec3 color;

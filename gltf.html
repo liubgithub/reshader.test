@@ -83,7 +83,7 @@
             }
         };
 
-        const fbo_scene =  regl.framebuffer({
+        const fbo_edg =  regl.framebuffer({
             color: regl.texture({
                 width: canvas.width,
                 height: canvas.height,
@@ -406,7 +406,7 @@
                 // 有一个uniform会自动设置：model， 值是mesh的localTransform
                 material.getUniforms(),
                 scene,
-                fbo_scene  //最后一个参数是framebuffer，可以指定framebuffer目标
+                fbo_edg  //最后一个参数是framebuffer，可以指定framebuffer目标
             );
         }
 

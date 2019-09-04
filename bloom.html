@@ -2,7 +2,7 @@
 <html>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>gltf model</title>
+  <title>bloom</title>
   <style type="text/css">
     html,body{margin:0px;height:100%;width:100%}
     .container{width:1000px;height:800px}
@@ -14,20 +14,22 @@
     <canvas id="canvas" width=1000 height=800 class="container" style="border : 1px solid"></canvas>
     <!-- <script src="./common/regl.js" type="text/javascript"></script> -->
     <script type="module">
-        import outlineVert from './shaders/quadVert.js';
+        import sceneVert from './shaders/bloom/scene_vert.js';
+        import sceneFrag from './shaders/bloom/scene_frag.js';
         import depth_vert from './shaders/depthVert.js';
         import depth_frag from './shaders/depthFrag.js';
-        import A_vert from './shaders/AVert.js';
-        import A_frag from './shaders/AFrag.js';
-        import B_frag from './shaders/BFrag.js';
-        import C_frag from './shaders/CFrag.js';
-        import D_frag from './shaders/DFrag.js';
+        import A_vert from './shaders/outline/AVert.js';
+        import A_frag from './shaders/outline/AFrag.js';
+        import B_frag from './shaders/outline/BFrag.js';
+        import C_frag from './shaders/outline/CFrag.js';
+        import D_frag from './shaders/outline/DFrag.js';
         import Edage_frag from './shaders/EdageFrag.js';
         import QuadScene_frag from './shaders/QuadSceneFrag.js';
         const { createREGL, mat4, reshader } = maptalksgl;
         const MODES = ['points', 'lines', 'line strip', 'line loop', 'triangles', 'triangle strip', 'triangle fan'];
         let camPos = [0, 0, 6];
         const cameraNearFar = [0.1, 200];
+        //
         let mouseDown = false;
         let roll = Math.PI;
         let pitch = 0.0;
@@ -83,7 +85,7 @@
             }
         };
 
-        const fbo_edg =  regl.framebuffer({
+        const fbo_scene =  regl.framebuffer({
             color: regl.texture({
                 width: canvas.width,
                 height: canvas.height,
@@ -174,16 +176,53 @@
             }),
             depth: true
         });
-        // const fbo_scene = regl.framebuffer({
-        //     color: regl.texture({
-        //         width: canvas.width,
-        //         height: canvas.height,
-        //         wrap: 'clamp',
-        //         mag : 'linear',
-        //         min : 'linear'
-        //     }),
-        //     depth: true
-        // });
+        
+        const scene_shader = new reshader.MeshShader({
+            vert : sceneVert,
+            frag : sceneFrag,
+            uniforms :[
+                // 'modelMatrix',
+                // 'modelViewMatrix',
+                'projectionMatrix',
+                'viewMatrix',
+                'cameraPosition',
+                'toneMappingExposure',
+                'diffuse',
+                'emissive',
+                'roughness',
+                'metalness',
+                'opacity',
+                'ambientLightColor',
+                'pointLights.position',
+                'pointLights.color',
+                'pointLights.distance',
+                'pointLights.decay',     
+                'pointLights.shadow',
+                'pointLights.shadowBias',
+                'pointLights.shadowRadius',
+                'pointLights.shadowMapSize',
+                'pointLights.shadowCameraNear',
+                'pointLights.shadowCameraFar',
+                {
+                    name : 'normalMatrix',
+                    type : 'function',
+                    fn : function (context, props) {
+                        const normalMatrix = [];
+                        mat4.invert(normalMatrix, props['modelMatrix']);
+                        mat4.transpose(normalMatrix, normalMatrix);
+                        return normalMatrix;
+                    }
+                },
+                {
+                    name : 'modelViewMatrix',
+                    type : 'function',
+                    fn : function (context, props) {
+                        return mat4.multiply([], props['viewMatrix'], props['modelMatrix']);
+                    }
+                }
+            ]
+        })
+
         const depth_shader = new reshader.MeshShader({
             vert : depth_vert,
             frag : depth_frag,
@@ -208,20 +247,12 @@
                 'projectionMatrix',
                 'viewMatrix',
                 'cameraPosition',
-                'depthTexture',
                 'cameraNearFar',
-                {
-                    name : 'textureMatrix',
-                    type : 'function',
-                    fn : function(context, props) {
-                        const textureMatrix = mat4.set([], 0.5, 0.0, 0.0, 0.5,
-                            0.0, 0.5, 0.0, 0.5, 0.0, 0.0, 0.5, 0.5, 0.0, 0.0, 0.0, 1.0);
-                        mat4.multiply(textureMatrix, textureMatrix, props['viewMatrix']);
-                        const inverseMatrix = mat4.invert([], props['modelMatrix']);
-                        mat4.multiply(textureMatrix, textureMatrix, inverseMatrix);
-                        return textureMatrix;
-                    }
-                },
+                'defaultColor',
+                'defaultOpacity',
+                'luminosityThreshold',
+                'smoothWidth',
+                'tDiffuse',
                 {
                     name : 'modelViewMatrix',
                     type : 'function',
@@ -231,7 +262,8 @@
                 }
             ],
             positionAttribute : 'POSITION',
-            extraCommandProps: { viewport,
+            extraCommandProps: { 
+                viewport : halfViewport,
                 cull: {
                     enable: false
                 }
@@ -239,7 +271,7 @@
         });
 
         const B_shader = new reshader.MeshShader({
-            vert : outlineVert,
+            vert : A_vert,
             frag : B_frag,
             uniforms : [
                 'opacity',
@@ -254,7 +286,7 @@
         });
 
         const C_shader = new reshader.MeshShader({
-            vert : outlineVert,
+            vert : A_vert,
             frag : C_frag,
             uniforms : [
                 'texSize',
@@ -271,7 +303,7 @@
         });
 
         const D_shader = new reshader.MeshShader({
-            vert : outlineVert,
+            vert : A_vert,
             frag : D_frag,
             uniforms : [
                 'texSize',
@@ -284,7 +316,7 @@
         });
 
         const Edage_shader = new reshader.MeshShader({
-            vert : outlineVert,
+            vert : A_vert,
             frag : Edage_frag,
             uniforms : [
                 'edgeStrength',
@@ -313,7 +345,7 @@
         });
 
         const QuadScene_shader = new reshader.MeshShader({
-            vert : outlineVert,
+            vert : A_vert,
             frag : QuadScene_frag,
             uniforms : [
                 'sceneTexture',
@@ -401,44 +433,62 @@
                 'maskTexture' : fbo_b,
                 'edgeTexture1' : fbo_d,
                 'edgeTexture2' : fbo_g
-            }, quadScene, fbo_edg);
+            }, quadScene, fbo_scene);
         }
        
         function drawSceneFBO(matrix) {      
-            const material = new reshader.PhongMaterial({
-                viewPos : camPos,
-                projViewMatrix : matrix.projViewMatrix
-            });
+            const uniforms = {
+                'cameraPosition' : camPos,
+                'projectionMatrix' : matrix.projMatrix,
+                'viewMatrix' : matrix.viewMatrix,
+                'toneMappingExposure' : 1,
+                'diffuse' : [0, 0, 0],
+                'emissive' : [0, 0, 0],
+                'roughness' : 0.7029,
+                'metalness' : 0.9224,
+                'opacity' : 0.8093,
+                'ambientLightColor' : [0.2510, 0.2510, 0.2510],
+                'pointLights.position' : [0, 0, 0],
+                'pointLights.color' : [1, 1, 1],
+                'pointLights.distance' : 0,
+                'pointLights.decay' : 1,     
+                'pointLights.shadow' : 0,
+                'pointLights.shadowBias' : 0,
+                'pointLights.shadowRadius' : 1,
+                'pointLights.shadowMapSize' : [0, 0],
+                'pointLights.shadowCameraNear' : 1,
+                'pointLights.shadowCameraFar' : 1000,
+            };
             renderer.render(
-                SceneShader,
+                scene_shader,
                 // 手动填入的uniform 值
                 // 有一个uniform会自动设置：model， 值是mesh的localTransform
-                material.getUniforms(),
+                uniforms,
                 scene,
-                fbo_edg  //最后一个参数是framebuffer，可以指定framebuffer目标
+                //fbo_scene  //最后一个参数是framebuffer，可以指定framebuffer目标
             );
         }
 
         function drawQuadScene() {
             renderer.render(QuadScene_shader, {
-                'sceneTexture' : fbo_edg,
+                'sceneTexture' : fbo_scene,
             }, quadScene);
         }
 
         function drawAll() {
             const matrix = getViewProjection(camPos, canvas.width / canvas.height);
             clearFBO();
-           drawSceneFBO(matrix);
-            drawDepthFBO(matrix);
-            drawAFBO(matrix);
-            drawBFBO();
-            drawCFBO();
-            drawDFBO();
-            drawEFBO();
-            drawFFBO();
-            drawGFBO();
-            drawEdageFBO();
-            drawQuadScene();
+            drawSceneFBO(matrix);
+            // drawDepthFBO(matrix);
+            // drawAFBO(matrix);
+            // drawBFBO();
+            // drawCFBO();
+            // drawDFBO();
+            // drawEFBO();
+            // drawFFBO();
+            // drawGFBO();
+            // drawEdageFBO();
+            // drawQuadScene();
             requestAnimationFrame(drawAll);
         }
 
@@ -518,7 +568,17 @@
                             //modelGeometry.generateBuffers(this.regl);//会抛elements must be array to build unique vertex.的异常，
                             const modelMesh = new reshader.Mesh(modelGeometry);
                             modelMeshes.push(modelMesh);
-                            setPhongTexture(primitive.material, modelMesh);
+                            //setPhongTexture(primitive.material, modelMesh);
+                            if (modelGeometry.data['TANGENT']) {
+                                modelMesh.setDefines({
+                                    USE_SHADOWMAP : 1,
+                                    USE_TANGENT : 1
+                                });
+                            } else {
+                                modelMesh.setDefines({
+                                    USE_SHADOWMAP : 1
+                                });
+                            }
                             modelMesh.setLocalTransform(transformMat);
                         });
                     });
@@ -633,7 +693,7 @@
             regl.clear({
                 color: [0, 0, 0, 1],
                 depth: 1,
-                framebuffer : fbo_edg
+                framebuffer : fbo_scene
             });
         }
 
