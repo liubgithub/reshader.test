@@ -6,13 +6,12 @@ precision highp int;
 #define VERTEX_TEXTURES
 #define GAMMA_FACTOR 2
 #define MAX_BONES 0
-#define USE_COLOR
 #define BONE_TEXTURE
 uniform mat4 modelMatrix;
 uniform mat4 modelViewMatrix;
 uniform mat4 projectionMatrix;
 uniform mat4 viewMatrix;
-uniform mat3 normalMatrix;
+uniform mat4 normalMatrix;
 uniform vec3 cameraPosition;
 attribute vec3 POSITION;
 attribute vec3 NORMAL;
@@ -188,7 +187,7 @@ float linearToRelativeLuminance( const in vec3 color ) {
         varying vec4 vSpotShadowCoord[ 0 ];
     #endif
     #if 1 > 0
-        uniform mat4 pointShadowMatrix[ 1 ];
+        uniform mat4 pointShadowMatrix;
         varying vec4 vPointShadowCoord[ 1 ];
     #endif
 #endif
@@ -240,12 +239,12 @@ void main() {
             objectTangent = vec4( skinMatrix * vec4( objectTangent, 0.0 ) ).xyz;
         #endif
     #endif
-    vec3 transformedNormal = normalMatrix * objectNormal;
+    vec3 transformedNormal = vec3(normalMatrix) * objectNormal;
     #ifdef FLIP_SIDED
         transformedNormal = - transformedNormal;
     #endif
     #ifdef USE_TANGENT
-        vec3 transformedTangent = normalMatrix * objectTangent;
+        vec3 transformedTangent = vec3(normalMatrix) * objectTangent;
         #ifdef FLIP_SIDED
             transformedTangent = - transformedTangent;
         #endif
@@ -308,7 +307,7 @@ void main() {
         #endif
         #if 1 > 0
             
-            vPointShadowCoord[ 0 ] = pointShadowMatrix[ 0 ] * worldPosition;
+            vPointShadowCoord[ 0 ] = pointShadowMatrix * worldPosition;
         #endif
     #endif
     #ifdef USE_FOG

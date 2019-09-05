@@ -4,7 +4,6 @@ precision highp int;
 #define SHADER_NAME MeshStandardMaterial
 #define STANDARD 
 #define GAMMA_FACTOR 2
-#define USE_COLOR
 uniform mat4 viewMatrix;
 uniform vec3 cameraPosition;
 #define TONE_MAPPING
@@ -13,6 +12,19 @@ uniform vec3 cameraPosition;
 #endif
 uniform float toneMappingExposure;
 uniform float toneMappingWhitePoint;
+struct PointLight {
+    vec3 position;
+    vec3 color;
+    float distance;
+    float decay;
+    int shadow;
+    float shadowBias;
+    float shadowRadius;
+    vec2 shadowMapSize;
+    float shadowCameraNear;
+    float shadowCameraFar;
+};
+uniform PointLight pointLights;
 vec3 LinearToneMapping( vec3 color ) {
     return toneMappingExposure * color;
 }
@@ -635,19 +647,6 @@ vec3 getAmbientLightIrradiance( const in vec3 ambientLightColor ) {
     }
 #endif
 #if 1 > 0
-    struct PointLight {
-        vec3 position;
-        vec3 color;
-        float distance;
-        float decay;
-        int shadow;
-        float shadowBias;
-        float shadowRadius;
-        vec2 shadowMapSize;
-        float shadowCameraNear;
-        float shadowCameraFar;
-    };
-    uniform PointLight pointLights;
     void getPointDirectLightIrradiance( const in PointLight pointLight, const in GeometricContext geometry, out IncidentLight directLight ) {
         vec3 lVector = pointLight.position - geometry.position;
         directLight.direction = normalize( lVector );
@@ -824,7 +823,7 @@ float computeSpecularOcclusion( const in float dotNV, const in float ambientOccl
         varying vec4 vSpotShadowCoord[ 0 ];
     #endif
     #if 1 > 0
-        uniform sampler2D pointShadowMap[ 1 ];
+        uniform sampler2D pointShadowMap;
         varying vec4 vPointShadowCoord[ 1 ];
     #endif
     float texture2DCompare( sampler2D depths, vec2 uv, float compare ) {
@@ -1107,7 +1106,7 @@ void main() {
         pointLight = pointLights;
         getPointDirectLightIrradiance( pointLight, geometry, directLight );
         #ifdef USE_SHADOWMAP
-            directLight.color *= all( bvec2( pointLight.shadow, directLight.visible ) ) ? getPointShadow( pointShadowMap[ 0 ], pointLight.shadowMapSize, pointLight.shadowBias, pointLight.shadowRadius, vPointShadowCoord[ 0 ], pointLight.shadowCameraNear, pointLight.shadowCameraFar ) : 1.0;
+            directLight.color *= all( bvec2( pointLight.shadow, directLight.visible ) ) ? getPointShadow( pointShadowMap, pointLight.shadowMapSize, pointLight.shadowBias, pointLight.shadowRadius, vPointShadowCoord[ 0 ], pointLight.shadowCameraNear, pointLight.shadowCameraFar ) : 1.0;
         #endif
         RE_Direct( directLight, geometry, material, reflectedLight );
     #endif

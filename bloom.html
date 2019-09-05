@@ -29,6 +29,7 @@
         const MODES = ['points', 'lines', 'line strip', 'line loop', 'triangles', 'triangle strip', 'triangle fan'];
         let camPos = [0, 0, 6];
         const cameraNearFar = [0.1, 200];
+        const pointShadowMatrix = mat4.identity([]);
         //
         let mouseDown = false;
         let roll = Math.PI;
@@ -60,10 +61,8 @@
 
         // let iblMaps;
         let scene;
-        const quadScene = getQuadScene();
-        // const loader = new reshader.ResourceLoader(regl.texture(2));
         const renderer = new reshader.Renderer(regl);
-
+        const pointShadowMap = regl.texture();
         const viewport = {
             x: 0,
             y: 0,
@@ -74,115 +73,11 @@
                 return canvas.height;
             }
         };
-        const halfViewport = {
-            x: 0,
-            y: 0,
-            width: () => {
-                return canvas.width / 2;
-            },
-            height: () => {
-                return canvas.height / 2;
-            }
-        };
-
-        const fbo_scene =  regl.framebuffer({
-            color: regl.texture({
-                width: canvas.width,
-                height: canvas.height,
-                wrap: 'clamp',
-                mag : 'linear',
-                min : 'linear'
-            }),
-            depth: true
-        });
-        
-        const fbo_depth = regl.framebuffer({
-            color: regl.texture({
-                width: canvas.width,
-                height: canvas.height,
-                wrap: 'clamp',
-                mag : 'linear',
-                min : 'linear'
-            }),
-            depth: true
-        });
-        const fbo_a =  regl.framebuffer({
-            color: regl.texture({
-                width: canvas.width,
-                height: canvas.height,
-                wrap: 'clamp',
-                mag : 'linear',
-                min : 'linear'
-            }),
-            depth: true
-        });
-        const fbo_b =  regl.framebuffer({
-            color: regl.texture({
-                width: canvas.width,
-                height: canvas.height,
-                wrap: 'clamp',
-                mag : 'linear',
-                min : 'linear'
-            }),
-            depth: true
-        });
-        const fbo_c =  regl.framebuffer({
-            color: regl.texture({
-                width: canvas.width,
-                height: canvas.height,
-                wrap: 'clamp',
-                mag : 'linear',
-                min : 'linear'
-            }),
-            depth: true
-        });
-        const fbo_d =  regl.framebuffer({
-            color: regl.texture({
-                width: canvas.width,
-                height: canvas.height,
-                wrap: 'clamp',
-                mag : 'linear',
-                min : 'linear'
-            }),
-            depth: true
-        });
-        const fbo_e =  regl.framebuffer({
-            color: regl.texture({
-                width: canvas.width,
-                height: canvas.height,
-                wrap: 'clamp',
-                mag : 'linear',
-                min : 'linear'
-            }),
-            depth: true
-        });
-        const fbo_f =  regl.framebuffer({
-            color: regl.texture({
-                width: canvas.width,
-                height: canvas.height,
-                wrap: 'clamp',
-                mag : 'linear',
-                min : 'linear'
-            }),
-            depth: true
-        });
-        const fbo_g =  regl.framebuffer({
-            color: regl.texture({
-                width: canvas.width,
-                height: canvas.height,
-                wrap: 'clamp',
-                mag : 'linear',
-                min : 'linear'
-            }),
-            depth: true
-        });
         
         const scene_shader = new reshader.MeshShader({
             vert : sceneVert,
             frag : sceneFrag,
             uniforms :[
-                // 'modelMatrix',
-                // 'modelViewMatrix',
                 'projectionMatrix',
                 'viewMatrix',
                 'cameraPosition',
@@ -193,9 +88,9 @@
                 'metalness',
                 'opacity',
                 'ambientLightColor',
-                'pointLights.position',
                 'pointLights.color',
                 'pointLights.distance',
+                'pointLights.position',
                 'pointLights.decay',     
                 'pointLights.shadow',
                 'pointLights.shadowBias',
@@ -203,6 +98,7 @@
                 'pointLights.shadowMapSize',
                 'pointLights.shadowCameraNear',
                 'pointLights.shadowCameraFar',
+                'pointShadowMatrix',
                 {
                     name : 'normalMatrix',
                     type : 'function',
@@ -223,219 +119,6 @@
             ]
         })
 
-        const depth_shader = new reshader.MeshShader({
-            vert : depth_vert,
-            frag : depth_frag,
-            uniforms : [
-               {
-                    name : 'projViewModelMatrix',
-                    type : 'function',
-                    fn : function (context, props) {
-                        return mat4.multiply([], props['projViewMatrix'], props['modelMatrix']);
-                    }
-                }
-            ],
-            positionAttribute : 'POSITION',
-            extraCommandProps: { viewport },
-            defines : {
-            }
-        });
-        const A_shader = new reshader.MeshShader({
-            vert : A_vert,
-            frag : A_frag,
-            uniforms : [
-                'projectionMatrix',
-                'viewMatrix',
-                'cameraPosition',
-                'cameraNearFar',
-                'defaultColor',
-                'defaultOpacity',
-                'luminosityThreshold',
-                'smoothWidth',
-                'tDiffuse',
-                {
-                    name : 'modelViewMatrix',
-                    type : 'function',
-                    fn : function (context, props) {
-                        return mat4.multiply([], props['viewMatrix'], props['modelMatrix']);
-                    } 
-                }
-            ],
-            positionAttribute : 'POSITION',
-            extraCommandProps: { 
-                viewport : halfViewport,
-                cull: {
-                    enable: false
-                }
-            },
-        });
-
-        const B_shader = new reshader.MeshShader({
-            vert : A_vert,
-            frag : B_frag,
-            uniforms : [
-                'opacity',
-                'tDiffuse'
-            ],
-            positionAttribute : 'POSITION',
-            extraCommandProps: { viewport,
-                cull: {
-                    enable: true
-                }
-            },
-        });
-
-        const C_shader = new reshader.MeshShader({
-            vert : A_vert,
-            frag : C_frag,
-            uniforms : [
-                'texSize',
-                'visibleEdgeColor',
-                'hiddenEdgeColor',
-                'maskTexture'
-            ],
-            positionAttribute : 'POSITION',
-            extraCommandProps: { viewport, depth: {
-                    enable: true,
-                    mask: true,
-                }
-            },
-        });
-
-        const D_shader = new reshader.MeshShader({
-            vert : A_vert,
-            frag : D_frag,
-            uniforms : [
-                'texSize',
-                'direction',
-                'kernelRadius',
-                'colorTexture'
-            ],
-            positionAttribute : 'POSITION',
-            extraCommandProps: { viewport },
-        });
-
-        const Edage_shader = new reshader.MeshShader({
-            vert : A_vert,
-            frag : Edage_frag,
-            uniforms : [
-                'edgeStrength',
-                'edgeGlow',
-                'maskTexture',
-                'edgeTexture1',
-                'edgeTexture2'
-            ],
-            positionAttribute : 'POSITION',
-            extraCommandProps: { viewport,
-                blend: {
-                    enable: true,
-                    func: {
-                        srcRGB: 'src alpha',
-                        srcAlpha: 'src alpha',
-                        dstRGB: 1,
-                        dstAlpha: 1
-                    },
-                    equation: {
-                        rgb: 'add',
-                        alpha: 'add'
-                    },
-                    color: [0, 0, 0, 0]
-                }
-            }
-        });
-
-        const QuadScene_shader = new reshader.MeshShader({
-            vert : A_vert,
-            frag : QuadScene_frag,
-            uniforms : [
-                'sceneTexture',
-            ],
-            positionAttribute : 'POSITION',
-            extraCommandProps: { viewport
-            }
-        });
-
-        const SceneShader = new reshader.PhongShader({
-            positionAttribute : 'POSITION'
-        });
-        function drawDepthFBO(marix) {
-            renderer.render(depth_shader, {
-                'projViewMatrix' : marix.projViewMatrix
-            }, scene, fbo_depth);
-        }
-
-        function drawAFBO(matrix) {
-            renderer.render(A_shader, {
-                'projectionMatrix' : matrix.projMatrix,
-                'viewMatrix' : matrix.viewMatrix,
-                'cameraPosition' : camPos,
-                'depthTexture' : fbo_depth,
-                'cameraNearFar' : cameraNearFar,
-            }, scene, fbo_a);
-        }
-
-        function drawBFBO() {
-            renderer.render(B_shader, {
-                'opacity' : 1,
-                'tDiffuse' : fbo_a,
-            }, quadScene, fbo_b);
-        }
-
-        function drawCFBO() {
-            renderer.render(C_shader, {
-                'texSize' : [canvas.width / 2, canvas.height / 2],
-                'visibleEdgeColor' : [0, 1, 0],
-                'hiddenEdgeColor' : [0.1000, 0.0400, 0.0200],
-                'maskTexture' : fbo_b
-            }, quadScene, fbo_c);
-        }
-
-        function drawDFBO() {
-            renderer.render(D_shader, {
-                'texSize' : [canvas.width / 2, canvas.height / 2],
-                'direction' : [1, 0],
-                'kernelRadius' : 1,
-                'colorTexture' : fbo_c
-            }, quadScene, fbo_d);
-        }
-
-        function drawEFBO() {
-            renderer.render(D_shader, {
-                'texSize' : [canvas.width / 2, canvas.height / 2],
-                'direction' : [0, 1],
-                'kernelRadius' : 1,
-                'colorTexture' : fbo_d
-            }, quadScene, fbo_e);
-        }
-
-        function drawFFBO() {
-            renderer.render(D_shader, {
-                'texSize' : [canvas.width / 4, canvas.height / 4],
-                'direction' : [1, 0],
-                'kernelRadius' : 2,
-                'colorTexture' : fbo_e
-            }, quadScene, fbo_f);
-        }
-
-        function drawGFBO() {
-            renderer.render(D_shader, {
-                'texSize' : [canvas.width / 4, canvas.height / 4],
-                'direction' : [0, 1],
-                'kernelRadius' : 2,
-                'colorTexture' : fbo_f
-            }, quadScene, fbo_g);
-        }
-
-        function drawEdageFBO() {
-            renderer.render(Edage_shader, {
-                'edgeStrength' : 3,
-                'edgeGlow' : 1,
-                'maskTexture' : fbo_b,
-                'edgeTexture1' : fbo_d,
-                'edgeTexture2' : fbo_g
-            }, quadScene, fbo_scene);
-        }
-       
         function drawSceneFBO(matrix) {      
             const uniforms = {
                 'cameraPosition' : camPos,
@@ -443,21 +126,21 @@
                 'viewMatrix' : matrix.viewMatrix,
                 'toneMappingExposure' : 1,
                 'diffuse' : [0, 0, 0],
-                'emissive' : [0, 0, 0],
-                'roughness' : 0.7029,
-                'metalness' : 0.9224,
                 'opacity' : 0.8093,
                 'ambientLightColor' : [0.2510, 0.2510, 0.2510],
-                'pointLights.position' : [0, 0, 0],
-                'pointLights.color' : [1, 1, 1],
-                'pointLights.distance' : 0,
-                'pointLights.decay' : 1,     
-                'pointLights.shadow' : 0,
-                'pointLights.shadowBias' : 0,
-                'pointLights.shadowRadius' : 1,
-                'pointLights.shadowMapSize' : [0, 0],
-                'pointLights.shadowCameraNear' : 1,
-                'pointLights.shadowCameraFar' : 1000,
+                'pointLights' : {
+                    'color' : [1, 1, 1],
+                    'distance' : 0,
+                    'position' : [0, 0, 0],
+                    'decay' : 1,     
+                    'shadow' : 0,
+                    'shadowBias' : 0,
+                    'shadowRadius' : 1,
+                    'shadowMapSize' : [0, 0],
+                    'shadowCameraNear' : 1,
+                    'shadowCameraFar' : 1000
+                },
+                'pointShadowMatrix' : pointShadowMatrix
             };
             renderer.render(
                 scene_shader,
@@ -469,26 +152,13 @@
             );
         }
 
-        function drawQuadScene() {
-            renderer.render(QuadScene_shader, {
-                'sceneTexture' : fbo_scene,
-            }, quadScene);
-        }
-
         function drawAll() {
             const matrix = getViewProjection(camPos, canvas.width / canvas.height);
-            clearFBO();
+            regl.clear({
+                color: [0, 0, 0, 1],
+                depth: 1
+            });
             drawSceneFBO(matrix);
-            // drawDepthFBO(matrix);
-            // drawAFBO(matrix);
-            // drawBFBO();
-            // drawCFBO();
-            // drawDFBO();
-            // drawEFBO();
-            // drawFFBO();
-            // drawGFBO();
-            // drawEdageFBO();
-            // drawQuadScene();
             requestAnimationFrame(drawAll);
         }
 
@@ -503,49 +173,6 @@
         }
 
         render();
-
-          //设置纹理
-        //TODO, 实现PBR的纹理
-        function setPhongTexture(material, modelMesh) {
-            const baseColorTexture = material.pbrMetallicRoughness.baseColorTexture;
-            if (baseColorTexture) {
-                const texture = setTexture(baseColorTexture.texture);
-                modelMesh.setDefines({
-                    USE_BASECOLORTEXTURE:1
-                });
-                modelMesh.setUniform('sample', texture);
-            }
-        }
-
-        function setTexture(tex) {
-            const data = tex.image.array;
-            const sampler = tex.sampler;
-            const  width = tex.image.width;
-            const height = tex.image.height;
-            const texture = regl.texture({
-                width,
-                height,
-                data,
-                mag : TEXTURE_SAMPLER[sampler.magFilter] || TEXTURE_SAMPLER['9728'],
-                min : TEXTURE_SAMPLER[sampler.minFilter] || TEXTURE_SAMPLER['9728'],
-                wrapS : TEXTURE_SAMPLER[sampler.wrapS] || TEXTURE_SAMPLER['10497'],
-                wrapT : TEXTURE_SAMPLER[sampler.wrapT] || TEXTURE_SAMPLER['10497']
-            });
-            return texture;
-        }
-
-        function getQuadScene() {
-            const plane = new reshader.Geometry({
-                POSITION: [-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]
-            }, 6, 0, {
-                    primitive: 'triangle',
-                    positionAttribute : 'POSITION',
-                    positionSize: 2
-                });
-            const planeMesh = new reshader.Mesh(plane);
-            const scene = new reshader.Scene([planeMesh]);
-            return scene;
-        }
 
         function getScene() {
             // var url = 'gltf/DamagedHelmet/glTF/DamagedHelmet.gltf';
@@ -567,16 +194,23 @@
                             const modelGeometry = createGeometry(primitive);
                             //modelGeometry.generateBuffers(this.regl);//会抛elements must be array to build unique vertex.的异常，
                             const modelMesh = new reshader.Mesh(modelGeometry);
+                            // 'emissive' : [0, 0, 0],
+                            // 'roughness' : 0.7029,
+                            // 'metalness' : 0.9224,
+                            modelMesh.setUniform('emissive', primitive.material.emissiveFactor);
+                            modelMesh.setUniform('roughness', primitive.material.pbrMetallicRoughness.roughnessFactor);
+                            modelMesh.setUniform('metalness', primitive.material.pbrMetallicRoughness.metallicFactor);
                             modelMeshes.push(modelMesh);
                             //setPhongTexture(primitive.material, modelMesh);
                             if (modelGeometry.data['TANGENT']) {
                                 modelMesh.setDefines({
-                                    USE_SHADOWMAP : 1,
-                                    USE_TANGENT : 1
+                                    USE_COLOR : 1,
+                                    USE_TANGENT : 1,
+                                    PREMULTIPLIED_ALPHA : 1
                                 });
                             } else {
                                 modelMesh.setDefines({
-                                    USE_SHADOWMAP : 1
+                                    USE_COLOR : 1
                                 });
                             }
                             modelMesh.setLocalTransform(transformMat);
@@ -647,54 +281,6 @@
                 meshes.push(node.mesh);
             }
             node.isParsed = true;
-        }
-
-        function clearFBO(){
-            regl.clear({
-                color: [1, 1, 1, 1],
-                depth: 1,
-                framebuffer : fbo_depth
-            });
-            regl.clear({
-                color: [1, 1, 1, 1],
-                depth: 1,
-                framebuffer : fbo_a
-            });
-            regl.clear({
-                color: [1, 1, 1, 1],
-                depth: 1,
-                framebuffer : fbo_b
-            });
-            regl.clear({
-                color: [1, 1, 1, 1],
-                depth: 1,
-                framebuffer : fbo_c
-            });
-            regl.clear({
-                color: [1, 1, 1, 1],
-                depth: 1,
-                framebuffer : fbo_d
-            });
-            regl.clear({
-                color: [1, 1, 1, 1],
-                depth: 1,
-                framebuffer : fbo_e
-            });
-            regl.clear({
-                color: [1, 1, 1, 1],
-                depth: 1,
-                framebuffer : fbo_f
-            });
-            regl.clear({
-                color: [1, 1, 1, 1],
-                depth: 1,
-                framebuffer : fbo_g
-            });
-            regl.clear({
-                color: [0, 0, 0, 1],
-                depth: 1,
-                framebuffer : fbo_scene
-            });
         }
 
         //鼠标事件相关
